@@ -807,7 +807,7 @@ export async function claimFees({ position_address }) {
 }
 
 // ─── Close Position ────────────────────────────────────────────
-export async function closePosition({ position_address }) {
+export async function closePosition({ position_address, _pnlOverride = null }) {
   position_address = normalizeMint(position_address);
   if (process.env.DRY_RUN === "true") {
     return { dry_run: true, would_close: position_address, message: "DRY RUN — no transaction sent" };
@@ -825,19 +825,28 @@ export async function closePosition({ position_address }) {
     const positionData = await pool.getPosition(positionPubKey);
 
     // ─── Snapshot PnL BEFORE closing (position is still on-chain) ───
-    let pnlUsd = 0;
-    let pnlPct = 0;
-    let finalValueUsd = 0;
+    // If PnL watcher provided an override (the value that triggered the close), trust it
+    // over the cache which may have been refreshed with stale/wrong API data
+    let pnlUsd = _pnlOverride?.pnl_usd ?? 0;
+    let pnlPct = _pnlOverride?.pnl_pct ?? 0;
+    let finalValueUsd = _pnlOverride?.total_value_usd ?? 0;
     let feesUsd = 0;
     const trackedPre = getTrackedPosition(position_address);
     feesUsd = trackedPre?.total_fees_claimed_usd || 0;
-    const cachedPos = _positionsCache?.positions?.find(p => p.position === position_address);
-    if (cachedPos) {
-      pnlUsd        = cachedPos.pnl_usd   ?? 0;
-      pnlPct        = cachedPos.pnl_pct   ?? 0;
-      finalValueUsd = cachedPos.total_value_usd ?? 0;
-      feesUsd       = (cachedPos.collected_fees_usd || 0) + (cachedPos.unclaimed_fees_usd || 0);
+
+    if (_pnlOverride) {
+      // PnL watcher already gave us accurate numbers at the moment it decided to close
+      feesUsd = (_pnlOverride.collected_fees_usd || 0) + (_pnlOverride.unclaimed_fees_usd || 0) || feesUsd;
+      log("close", `Using PnL override from watcher: ${pnlPct}% ($${pnlUsd})`);
     } else {
+      // No override — snapshot from cache or fresh API
+      const cachedPos = _positionsCache?.positions?.find(p => p.position === position_address);
+      if (cachedPos) {
+        pnlUsd        = cachedPos.pnl_usd   ?? 0;
+        pnlPct        = cachedPos.pnl_pct   ?? 0;
+        finalValueUsd = cachedPos.total_value_usd ?? 0;
+        feesUsd       = (cachedPos.collected_fees_usd || 0) + (cachedPos.unclaimed_fees_usd || 0);
+      } else {
       // No cache — fetch fresh from API while position is still open
       try {
         const freshPnl = await getPositionPnl({ pool_address: poolAddress, position_address });
@@ -851,6 +860,7 @@ export async function closePosition({ position_address }) {
         log("close_warn", `Could not snapshot PnL before close: ${e.message}`);
       }
     }
+    } // end of !_pnlOverride
 
     const txHashes = [];
 

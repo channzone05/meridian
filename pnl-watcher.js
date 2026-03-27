@@ -82,7 +82,16 @@ export async function runPnlWatcher() {
         // ─── Exit triggered — close position ──────────────────────
         log("pnl_watcher", `EXIT TRIGGERED for ${p.pair || p.position.slice(0, 8)}: ${reason}`);
 
-        const closeResult = await closePosition({ position_address: p.position });
+        const closeResult = await closePosition({
+          position_address: p.position,
+          _pnlOverride: {
+            pnl_usd: p.pnl_usd,
+            pnl_pct: p.pnl_pct,
+            total_value_usd: p.total_value_usd,
+            collected_fees_usd: p.collected_fees_usd,
+            unclaimed_fees_usd: p.unclaimed_fees_usd,
+          },
+        });
 
         if (!closeResult?.success) {
           log("pnl_watcher_error", `Failed to close ${p.position.slice(0, 8)}: ${closeResult?.error || "unknown error"}`);
