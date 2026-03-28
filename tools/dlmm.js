@@ -882,17 +882,34 @@ export async function closePosition({ position_address, _pnlOverride = null }) {
 
     // ─── Step 2: Remove Liquidity & Close ──────────────────────
     log("close", `Step 2: Removing liquidity and closing account`);
-    const closeTx = await pool.removeLiquidity({
-      user: wallet.publicKey,
-      position: positionPubKey,
-      fromBinId: -887272,
-      toBinId: 887272,
-      bps: new BN(10000),
-      shouldClaimAndClose: true,
-    });
+    try {
+      const closeTx = await pool.removeLiquidity({
+        user: wallet.publicKey,
+        position: positionPubKey,
+        fromBinId: -887272,
+        toBinId: 887272,
+        bps: new BN(10000),
+        shouldClaimAndClose: true,
+      });
 
-    for (const tx of Array.isArray(closeTx) ? closeTx : [closeTx]) {
-      const txHash = await sendAndConfirmTransaction(getConnection(), tx, [wallet], { skipPreflight: true });
+      for (const tx of Array.isArray(closeTx) ? closeTx : [closeTx]) {
+        const txHash = await sendAndConfirmTransaction(getConnection(), tx, [wallet], { skipPreflight: true });
+        txHashes.push(txHash);
+      }
+    } catch (removeErr) {
+      // Zombie position: liquidity was already removed in a previous attempt
+      // but the account wasn't closed. The SDK crashes reading binId from
+      // empty bin arrays. Fall back to closing the empty account directly.
+      const isBinIdErr = removeErr.message?.includes("reading 'binId'")
+        || removeErr.message?.includes("Cannot read properties of undefined");
+      if (!isBinIdErr) throw removeErr;
+
+      log("close", `Position appears empty (zombie) — falling back to closePositionIfEmpty`);
+      const closeTx = await pool.closePositionIfEmpty({
+        owner: wallet.publicKey,
+        position: positionData,
+      });
+      const txHash = await sendAndConfirmTransaction(getConnection(), closeTx, [wallet], { skipPreflight: true });
       txHashes.push(txHash);
     }
     log("close", `SUCCESS txs: ${txHashes.join(", ")}`);
