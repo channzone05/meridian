@@ -432,14 +432,139 @@ async function fetchDlmmPnlForPool(poolAddress, walletAddress) {
   }
 }
 
-// ─── Get Position PnL (Meteora API) ─────────────────────────────
+// ─── LP Agent PnL API (primary PnL source) ─────────────────────
+const LPAGENT_API = "https://api.lpagent.io/open-api/v1";
+const _lpaKeys = (process.env.LPAGENT_API_KEY || "").split(",").map(k => k.trim()).filter(Boolean);
+let _lpaKeyIdx = 0;
+
+function _nextLpaKey() {
+  if (_lpaKeys.length === 0) return null;
+  const key = _lpaKeys[_lpaKeyIdx % _lpaKeys.length];
+  _lpaKeyIdx++;
+  return key;
+}
+
+// Short-lived cache: single LP Agent call serves getMyPositions + getPositionPnl
+let _lpaCache = null;     // Map<positionAddress, lpAgentData>
+let _lpaCacheAt = 0;
+const LPA_CACHE_TTL = 10_000; // 10 seconds
+
+/**
+ * Fetch ALL open positions from LP Agent for the given wallet.
+ * Returns a Map keyed by position address → raw LP Agent position object.
+ * Returns null on 429, fetch error, or no API keys configured (triggers Meteora fallback).
+ */
+async function fetchLpAgentOpenPositions(walletAddress) {
+  // Return cached result if fresh
+  if (_lpaCache && Date.now() - _lpaCacheAt < LPA_CACHE_TTL) {
+    return _lpaCache;
+  }
+
+  const apiKey = _nextLpaKey();
+  if (!apiKey) return null;
+
+  try {
+    const res = await fetch(
+      `${LPAGENT_API}/lp-positions/opening?owner=${walletAddress}`,
+      { headers: { "x-api-key": apiKey } }
+    );
+
+    if (res.status === 429) {
+      log("lpa_pnl", "LP Agent 429 rate limited — falling back to Meteora");
+      return null;
+    }
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      log("lpa_pnl", `LP Agent HTTP ${res.status}: ${body.slice(0, 120)}`);
+      return null;
+    }
+
+    const json = await res.json();
+    if (json.status !== "success" || !Array.isArray(json.data)) {
+      log("lpa_pnl", `LP Agent unexpected response: status=${json.status}, keys=${Object.keys(json).join(",")}`);
+      return null;
+    }
+
+    const map = new Map();
+    for (const pos of json.data) {
+      if (pos.position) map.set(pos.position, pos);
+    }
+
+    _lpaCache = map;
+    _lpaCacheAt = Date.now();
+    return map;
+  } catch (e) {
+    log("lpa_pnl", `LP Agent fetch error: ${e.message}`);
+    return null;
+  }
+}
+
+/**
+ * Normalize LP Agent position data → Meteora-compatible field names
+ * so downstream enrichment code works identically regardless of source.
+ */
+function normalizeLpAgentPosition(lpa) {
+  if (!lpa) return null;
+  return {
+    lowerBinId: lpa.tickLower,
+    upperBinId: lpa.tickUpper,
+    poolActiveBinId: null, // LP Agent doesn't provide active bin
+    isOutOfRange: lpa.inRange === false,
+    pnlUsd: lpa.pnl?.value ?? 0,
+    pnlPctChange: lpa.pnl?.percent ?? 0,
+    pnlSolPctChange: lpa.pnl?.percentNative ?? 0,
+    createdAt: lpa.createdAt
+      ? (typeof lpa.createdAt === "number" ? lpa.createdAt : new Date(lpa.createdAt).getTime() / 1000)
+      : null,
+    unrealizedPnl: {
+      // LP Agent returns token amounts, not USD — convert using prices
+      unclaimedFeeTokenX: { usd: parseFloat(lpa.unCollectedFee0 || 0) * (lpa.price0 || 0) },
+      unclaimedFeeTokenY: { usd: parseFloat(lpa.unCollectedFee1 || 0) * (lpa.price1 || 0) },
+      balances: lpa.currentValue ?? lpa.value ?? 0,
+    },
+    allTimeFees: {
+      total: { usd: lpa.collectedFee ?? 0 },
+    },
+    allTimeDeposits: {
+      total: { usd: lpa.inputValue ?? 0 },
+      tokenX: { amount: lpa.current?.amount0 ?? 0 },
+      tokenY: { amountSol: lpa.inputNative ?? 0 },
+    },
+    // Extra fields from LP Agent not in Meteora
+    _lpa_inRange: lpa.inRange,
+    _lpa_dpr: lpa.dpr,
+    _lpa_ageHour: lpa.ageHour,
+    _lpa_strategy: lpa.strategyType,
+    _lpa_pairName: lpa.pairName,
+    _lpa_source: "lpagent",
+  };
+}
+
+// ─── Get Position PnL (LP Agent primary, Meteora fallback) ──────
 export async function getPositionPnl({ pool_address, position_address }) {
   pool_address = normalizeMint(pool_address);
   position_address = normalizeMint(position_address);
   const walletAddress = getWallet().publicKey.toString();
   try {
-    const byAddress = await fetchDlmmPnlForPool(pool_address, walletAddress);
-    const p = byAddress[position_address];
+    // LP Agent primary — uses cached result if recent (10s TTL)
+    let p = null;
+    let source = "meteora";
+    try {
+      const lpAgentPositions = await fetchLpAgentOpenPositions(walletAddress);
+      const lpaRaw = lpAgentPositions?.get(position_address) || null;
+      if (lpaRaw) {
+        p = normalizeLpAgentPosition(lpaRaw);
+        source = "lpagent";
+      }
+    } catch { /* fallback to Meteora */ }
+
+    // Meteora fallback — per-pool call
+    if (!p) {
+      const byAddress = await fetchDlmmPnlForPool(pool_address, walletAddress);
+      p = byAddress[position_address] || null;
+      source = "meteora";
+    }
+
     if (!p) return { error: "Position not found in PnL API" };
 
     const unclaimedUsd    = parseFloat(p.unrealizedPnl?.unclaimedFeeTokenX?.usd || 0) + parseFloat(p.unrealizedPnl?.unclaimedFeeTokenY?.usd || 0);
@@ -469,6 +594,7 @@ export async function getPositionPnl({ pool_address, position_address }) {
       upper_bin:   p.upperBinId      ?? null,
       active_bin:  p.poolActiveBinId ?? null,
       age_minutes: p.createdAt ? Math.floor((Date.now() - p.createdAt * 1000) / 60000) : null,
+      _source:     source,
     };
   } catch (error) {
     log("pnl_error", error.message);
@@ -521,32 +647,54 @@ export async function getMyPositions({ force = false } = {}) {
       });
     }
 
-    // Enrich with DLMM PnL API for each unique pool in parallel
+    // Enrich with PnL data — LP Agent primary, Meteora fallback
     const uniquePools = [...new Set(raw.map((p) => p.pool))];
     // Check if any positions are untracked (will need LP Agent data for auto-adopt)
     const hasUntracked = raw.some((r) => !getTrackedPosition(r.position));
 
-    // Fire all independent network calls in parallel:
-    // - PnL API per pool
+    // Try LP Agent first (single call for all positions)
+    let lpAgentPositions = null;
+    try {
+      lpAgentPositions = await fetchLpAgentOpenPositions(walletAddress);
+    } catch { /* fallback to Meteora */ }
+
+    // Fallback: if LP Agent failed, use Meteora PnL API per pool
+    let pnlByPool = {};
+    if (!lpAgentPositions) {
+      const pnlMaps = await Promise.all(uniquePools.map((pool) => fetchDlmmPnlForPool(pool, walletAddress)));
+      uniquePools.forEach((pool, i) => { pnlByPool[pool] = pnlMaps[i]; });
+    }
+
+    // Fire remaining independent network calls in parallel:
     // - SOL price
     // - LP Agent historical (only if untracked positions exist)
-    const [pnlMaps, walletBalResult, lpAgentMap] = await Promise.all([
-      Promise.all(uniquePools.map((pool) => fetchDlmmPnlForPool(pool, walletAddress))),
+    const [walletBalResult, lpAgentHistMap] = await Promise.all([
       getWalletBalances().catch(() => ({ sol_price: 0 })),
       hasUntracked
         ? import("./lp-overview.js").then((m) => m.fetchHistoricalPositionMap()).catch(() => new Map())
         : Promise.resolve(new Map()),
     ]);
 
-    const pnlByPool = {};
-    uniquePools.forEach((pool, i) => { pnlByPool[pool] = pnlMaps[i]; });
+    log("positions", lpAgentPositions ? `LP Agent: ${lpAgentPositions.size} positions` : "LP Agent unavailable, using Meteora fallback");
 
     // SOL price for conversion (one fetch, shared across all positions)
     const solPrice = walletBalResult.sol_price || 0;
     const toSol = (usd) => solPrice > 0 ? Math.round((usd / solPrice) * 10000) / 10000 : null;
 
     const positions = await Promise.all(raw.map(async (r) => {
-      const p = pnlByPool[r.pool]?.[r.position] || null;
+      // LP Agent primary, Meteora fallback per position
+      const p_lpa = lpAgentPositions?.get(r.position) || null;
+      // If LP Agent has this position, use it; otherwise fall back to Meteora for this specific position
+      const p_met = !p_lpa ? (pnlByPool[r.pool]?.[r.position] || null) : null;
+      // If LP Agent was available but doesn't have this position, try Meteora for just this pool
+      let p_met_fallback = null;
+      if (lpAgentPositions && !p_lpa && !p_met) {
+        try {
+          const poolPnl = await fetchDlmmPnlForPool(r.pool, walletAddress);
+          p_met_fallback = poolPnl[r.position] || null;
+        } catch { /* no PnL data available */ }
+      }
+      const p = p_lpa ? normalizeLpAgentPosition(p_lpa) : (p_met || p_met_fallback);
 
       const lowerBin  = p?.lowerBinId      ?? r.lower_bin;
       const upperBin  = p?.upperBinId      ?? r.upper_bin;
@@ -576,11 +724,11 @@ export async function getMyPositions({ force = false } = {}) {
           const poolDetail = await getPoolDetail({ pool_address: r.pool, timeframe: "1h" }).catch(() => null);
 
           // Use pre-fetched LP Agent data (single API call shared across all positions)
-          const lpAgentData = lpAgentMap.get(r.position) || null;
+          const lpAgentData = lpAgentHistMap.get(r.position) || null;
 
-          // Strategy: LP Agent > bin distribution inference > deposit-based guess
-          let inferredStrategy = lpAgentData?.strategy || "bid_ask";
-          if (!lpAgentData?.strategy) {
+          // Strategy: LP Agent PnL > LP Agent historical > bin distribution inference > deposit-based guess
+          let inferredStrategy = p._lpa_strategy || lpAgentData?.strategy || "bid_ask";
+          if (!p._lpa_strategy && !lpAgentData?.strategy) {
             try {
               const pool = await getPool(r.pool);
               const posData = await pool.getPosition(new PublicKey(r.position));
@@ -609,12 +757,12 @@ export async function getMyPositions({ force = false } = {}) {
             bin_range: {
               min: p.lowerBinId,
               max: p.upperBinId,
-              bins_below: p.poolActiveBinId - p.lowerBinId,
-              bins_above: p.upperBinId - p.poolActiveBinId,
+              bins_below: p.poolActiveBinId != null ? p.poolActiveBinId - p.lowerBinId : null,
+              bins_above: p.poolActiveBinId != null ? p.upperBinId - p.poolActiveBinId : null,
             },
             amount_sol: depositSol,
             amount_x: parseFloat(p.allTimeDeposits?.tokenX?.amount || 0),
-            active_bin_at_deploy: p.poolActiveBinId,
+            active_bin_at_deploy: p.poolActiveBinId ?? null,
             bin_step: poolDetail?.bin_step || null,
             volatility: poolDetail?.volatility || null,
             fee_tvl_ratio: poolDetail?.fee_active_tvl_ratio || null,
@@ -625,7 +773,7 @@ export async function getMyPositions({ force = false } = {}) {
             adopted: true,
           });
 
-          const source = lpAgentData?.strategy ? "LP Agent" : "inferred";
+          const source = p._lpa_strategy ? "LP Agent PnL" : lpAgentData?.strategy ? "LP Agent hist" : "inferred";
           log("adopt", `Auto-adopted position ${r.position.slice(0, 8)} in ${poolDetail?.name || r.pool.slice(0, 8)} (${inferredStrategy} via ${source}, ${depositSol.toFixed(2)} SOL, $${depositUsd.toFixed(2)})`);
         } catch (e) {
           log("adopt_warn", `Failed to auto-adopt ${r.position.slice(0, 8)}: ${e.message}`);
