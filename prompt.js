@@ -47,7 +47,21 @@ export function getRangeSelectionText(deployAmount, currentBalanceSol) {
 }
 
 function _defaultRangeSelectionText(deployAmount, currentBalanceSol) {
-  return `- RANGE: Start with avg_range_pct from study_top_lpers, then adjust using your MEMORY and LESSONS. Your own experience overrides historical averages. Default to 35% if no study data.
+  return `- RANGE SIZING (volatility-driven — do NOT use study_top_lpers avg_range_pct for range):
+  Size your range from the pool's CURRENT conditions, not historical LPer behavior:
+
+  Pool Volatility  │ bid_ask range │ spot range  │ Reasoning
+  ─────────────────┼───────────────┼─────────────┼─────────────────────────────
+  >= 8  (extreme)  │ 50–70%        │ 60–80%      │ Wild swings, need room
+  5–8   (high)     │ 40–55%        │ 50–65%      │ Active memecoin territory
+  2–5   (moderate) │ 30–45%        │ 40–55%      │ Normal volatile pool
+  < 2   (low)      │ 25–35%        │ 30–40%      │ Ranging/stable, tighter = more fees
+
+  Adjust from the table using your MEMORY and LESSONS:
+  - If LESSONS show repeated OOR downside on similar pools → go wider within the band
+  - If LESSONS show positions staying in range → go tighter for better fee concentration
+  - study_top_lpers patterns (hold time, strategy, win rate) are useful context but their avg_range_pct reflects a DIFFERENT market regime — do not copy it
+
 - OOR DIRECTION MATTERS — widening range only helps if OOR matches the direction your liquidity extends:
   * bid_ask (SOL below active bin): range extends DOWNWARD only. Wider range helps with DOWNSIDE OOR. Widening CANNOT fix upside OOR — price pumped above your liquidity and no amount of extra bins below will reach it.
   * If you keep going OOR-upside on bid_ask, the problem is NOT range width — the token is pumping away from your position. Either wait for the pump to end, use a two-sided strategy with token exposure (sol_split_pct < 100), or skip the pool entirely.
@@ -56,7 +70,7 @@ function _defaultRangeSelectionText(deployAmount, currentBalanceSol) {
   * NEVER generate a lesson saying "use wider range" for upside OOR on a single-sided-below strategy. That analysis is fundamentally wrong.
 - COMPOUNDING: Deploy amount is ${deployAmount} SOL (scaled from wallet: ${currentBalanceSol ?? "?"} SOL). Do NOT override with a smaller amount.
 - After deploy: update_config setting=managementIntervalMin based on volatility (>=5→3, 2-5→5, <2→10).
-- Report: strategy chosen + why, price_range_pct used + source (study data or default), deploy amount, interval set.`;
+- Report: strategy chosen + why, price_range_pct used + volatility basis, deploy amount, interval set.`;
 }
 
 /** Build default section texts (without config interpolation for manager_logic) */
@@ -70,7 +84,7 @@ function _getDefaultSections() {
 
 function _defaultScreenerCriteria() {
   return `1. SCREEN: Use get_top_candidates or discover_pools.
-2. STUDY: Call study_top_lpers. Look for high win rates and sustainable volume. Treat avg_range_pct as a starting point — adjust based on your LESSONS and MEMORY (especially OOR direction patterns from past sessions).
+2. STUDY: Call study_top_lpers. Look for high win rates, sustainable volume, strategy choices (bid_ask vs spot), and hold times. Do NOT use avg_range_pct for your range — size from the volatility table in range selection rules instead.
 3. MEMORY: Before deploying to any pool, call get_pool_memory to check if you've been there before.
 4. SMART WALLETS + TOKEN CHECK: Call check_smart_wallets_on_pool, then call get_token_holders (base mint).
    - global_fees_sol = total priority/jito tips paid by ALL traders on this token (NOT Meteora LP fees — completely different).

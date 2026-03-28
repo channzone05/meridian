@@ -297,10 +297,10 @@ export async function studyTopLPers({ pool_address, limit = 4 }) {
     .map(p => p.range_pct)
     .filter(isNum);
   if (allRanges.length > 0) {
-    patterns.avg_range_pct = Math.round(avg(allRanges) * 10) / 10;
-    patterns.min_range_pct = Math.min(...allRanges);
-    patterns.max_range_pct = Math.max(...allRanges);
-    patterns.recommended_range_pct = `Use price_range_pct=${Math.round(patterns.avg_range_pct)} in deploy_position`;
+    patterns.historical_avg_range_pct = Math.round(avg(allRanges) * 10) / 10;
+    patterns.historical_min_range_pct = Math.min(...allRanges);
+    patterns.historical_max_range_pct = Math.max(...allRanges);
+    patterns.range_note = "Historical ranges are informational only — size YOUR range from the volatility table, not these numbers. Market conditions (mcap, volume, volatility) may have changed significantly since these positions were opened.";
   }
 
   return {

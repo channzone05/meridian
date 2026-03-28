@@ -409,7 +409,8 @@ ${activeStrategy ? `\nSAVED STRATEGY (reference, not mandatory): ${activeStrateg
           const dynFeeResult = dynFeeMap[c.pool] || null;
           const tokenData = infoResult?.results?.[0];
 
-          let block = `[${c.name}] pool: ${c.pool} | bin_step: ${c.bin_step} | fee/aTVL: ${c.fee_active_tvl_ratio}% | vol: $${c.volume} | organic: ${c.organic_score} | holders: ${c.holders}`;
+          let block = `[${c.name}] pool: ${c.pool} | bin_step: ${c.bin_step} | fee/aTVL: ${c.fee_active_tvl_ratio}% | vol: $${c.volume} | organic: ${c.organic_score} | holders: ${c.holders} | volatility: ${c.volatility ?? "?"}`;
+
           if (dynFeeResult) block += ` | base_fee: ${c.fee_pct}% | dynamic_fee: ${dynFeeResult.dynamic_fee_pct}%`;
           if (tokenData) {
             if (tokenData.mcap) block += ` | mcap: $${(tokenData.mcap / 1000).toFixed(0)}k`;
@@ -481,16 +482,12 @@ HARD SKIP rules still apply:
 - No smart wallets + empty/hype narrative → skip
 
 Pick the best candidate, then: study_top_lpers → deploy_position with ${deployAmount} SOL.
-Use study_top_lpers patterns.avg_range_pct as a STARTING POINT for your price_range_pct. Then adjust:
-- Check your MEMORY RECALL and LESSONS above: if past sessions show repeated OOR at the study range for this pool or similar pools, WIDEN by 10-20%.
-- Downside OOR lessons → widen more aggressively (higher risk).
-- Upside OOR lessons → study range may be fine (upside OOR = missed fees, no loss).
-- Higher current volatility than study LPers' conditions → widen range.
-Your own experience overrides historical averages. Default to 35% if no study data.` : `1. get_top_candidates, pick the best one.
+Size your price_range_pct from the VOLATILITY TABLE in the range selection rules below — NOT from study avg_range_pct.
+study_top_lpers is useful for strategy choice (bid_ask vs spot), hold times, and win rates — but their range data is from a different market regime and should not drive your range.` : `1. get_top_candidates, pick the best one.
 2. check_smart_wallets_on_pool, get_token_holders (check global_fees_sol >= ${config.screening.minTokenFeesSol}), get_token_narrative.
 3. HARD SKIP if global_fees_sol < ${config.screening.minTokenFeesSol} SOL or holders/narrative red flags.
-4. study_top_lpers → use patterns.avg_range_pct as STARTING POINT for price_range_pct. Adjust based on your LESSONS/MEMORY (especially OOR patterns). Default 35% if no data.
-5. deploy_position with ${deployAmount} SOL and price_range_pct from study (adjusted by lessons).`}
+4. study_top_lpers → use for strategy choice, hold times, win rates. Do NOT use avg_range_pct for your range — size from the VOLATILITY TABLE instead.
+5. deploy_position with ${deployAmount} SOL and price_range_pct from volatility table (adjusted by lessons).`}
 ${getRangeSelectionText(deployAmount, currentBalance?.sol)}
       `, config.llm.maxSteps, [], "SCREENER", config.llm.screeningModel);
       screenReport = content;
