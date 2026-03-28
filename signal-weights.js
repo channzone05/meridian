@@ -49,10 +49,19 @@ const CATEGORICAL_SIGNALS = new Set(["narrative_quality"]);
 
 // ─── Persistence ─────────────────────────────────────────────────
 
+const DEFAULT_DIRECTIONS = Object.fromEntries(
+  SIGNAL_NAMES.map((s) => {
+    if (HIGHER_IS_BETTER.has(s)) return [s, "higher"];
+    if (BOOLEAN_SIGNALS.has(s)) return [s, "present=better"];
+    return [s, "unknown"];
+  })
+);
+
 export function loadWeights() {
   if (!fs.existsSync(WEIGHTS_FILE)) {
     const initial = {
       weights: { ...DEFAULT_WEIGHTS },
+      directions: { ...DEFAULT_DIRECTIONS },
       last_recalc: null,
       recalc_count: 0,
       history: [],
@@ -62,11 +71,26 @@ export function loadWeights() {
     return initial;
   }
   try {
-    return JSON.parse(fs.readFileSync(WEIGHTS_FILE, "utf8"));
+    const data = JSON.parse(fs.readFileSync(WEIGHTS_FILE, "utf8"));
+    // Gracefully add directions field to existing files that lack it
+    if (!data.directions) {
+      data.directions = { ...DEFAULT_DIRECTIONS };
+    } else {
+      // Ensure all signals have a direction entry
+      for (const name of SIGNAL_NAMES) {
+        if (data.directions[name] == null) {
+          if (HIGHER_IS_BETTER.has(name)) data.directions[name] = "higher";
+          else if (BOOLEAN_SIGNALS.has(name)) data.directions[name] = "present=better";
+          else data.directions[name] = "unknown";
+        }
+      }
+    }
+    return data;
   } catch (err) {
     log("signal_weights_error", `Failed to read signal-weights.json: ${err.message}`);
     return {
       weights: { ...DEFAULT_WEIGHTS },
+      directions: { ...DEFAULT_DIRECTIONS },
       last_recalc: null,
       recalc_count: 0,
       history: [],
@@ -142,12 +166,31 @@ export function recalculateWeights(perfData, cfg = {}) {
     }
   }
 
-  const ranked = Object.entries(lifts).sort((a, b) => b[1] - a[1]);
+  // Rank by absolute lift — high-predictive signals regardless of direction get boosted
+  const ranked = Object.entries(lifts).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
 
   if (ranked.length === 0) {
     log("signal_weights", "No signals had enough samples for lift calculation");
     return { changes: [], weights };
   }
+
+  // Track signal directions
+  const directions = data.directions || { ...DEFAULT_DIRECTIONS };
+
+  for (const [signal, lift] of ranked) {
+    // HIGHER_IS_BETTER signals always have direction "higher" — don't overwrite
+    if (HIGHER_IS_BETTER.has(signal)) {
+      directions[signal] = "higher";
+    } else if (BOOLEAN_SIGNALS.has(signal)) {
+      // Boolean: positive lift means present=better, negative means absent=better
+      directions[signal] = lift > 0 ? "present=better" : "absent=better";
+    } else {
+      // Numeric non-HIGHER_IS_BETTER: track learned direction
+      directions[signal] = lift > 0 ? "higher" : "lower";
+    }
+  }
+
+  data.directions = directions;
 
   // Split into quartiles
   const q1End = Math.ceil(ranked.length * 0.25);
@@ -156,7 +199,8 @@ export function recalculateWeights(perfData, cfg = {}) {
   const topQuartile = new Set(ranked.slice(0, q1End).map(([name]) => name));
   const bottomQuartile = new Set(ranked.slice(q3Start).map(([name]) => name));
 
-  // Apply boosts and decays
+  // Apply boosts and decays with mean reversion
+  const meanReversionRate = darwin.meanReversionRate ?? 0.02; // 2% pull toward 1.0
   const changes = [];
 
   for (const [signal, lift] of ranked) {
@@ -164,10 +208,16 @@ export function recalculateWeights(perfData, cfg = {}) {
     let next = prev;
 
     if (topQuartile.has(signal)) {
-      next = Math.min(prev * boostFactor, weightCeiling);
+      next = prev * boostFactor;
     } else if (bottomQuartile.has(signal)) {
-      next = Math.max(prev * decayFactor, weightFloor);
+      next = prev * decayFactor;
     }
+
+    // Mean reversion: gently pull toward neutral (1.0) to prevent runaway drift
+    next = next + (1.0 - next) * meanReversionRate;
+
+    // Clamp to floor/ceiling
+    next = Math.max(weightFloor, Math.min(weightCeiling, next));
 
     next = Math.round(next * 1000) / 1000;
 
@@ -178,10 +228,11 @@ export function recalculateWeights(perfData, cfg = {}) {
         from: prev,
         to: next,
         lift: Math.round(lift * 1000) / 1000,
+        direction: directions[signal],
         action: dir,
       });
       weights[signal] = next;
-      log("signal_weights", `${signal}: ${prev} -> ${next} (${dir}, lift=${lift.toFixed(3)})`);
+      log("signal_weights", `${signal}: ${prev} -> ${next} (${dir}, lift=${lift.toFixed(3)}, direction=${directions[signal]})`);
     }
   }
 
@@ -262,12 +313,10 @@ function computeNumericLift(signal, wins, losses, minSamples) {
   const winMean  = mean(winVals.map(normalize));
   const lossMean = mean(lossVals.map(normalize));
 
-  // For "higher is better" signals, positive lift means winners have higher values
-  // For ambiguous signals (mcap, volatility), we use absolute lift
-  if (HIGHER_IS_BETTER.has(signal)) {
-    return winMean - lossMean;
-  }
-  return Math.abs(winMean - lossMean);
+  // Return signed lift for ALL numeric signals.
+  // Positive lift = winners have higher values; negative = winners have lower values.
+  // Direction information is preserved so the agent knows which way to optimize.
+  return winMean - lossMean;
 }
 
 /**
@@ -364,8 +413,10 @@ function mean(arr) {
 export function getWeightsSummary() {
   const data = loadWeights();
   const w = data.weights || {};
+  const dirs = data.directions || {};
 
   const lines = ["Signal Weights (Darwinian — learned from past positions):"];
+  lines.push("  (direction shows how the agent should interpret each signal)");
 
   const sorted = SIGNAL_NAMES
     .filter((s) => w[s] != null)
@@ -375,7 +426,9 @@ export function getWeightsSummary() {
     const val = w[signal] ?? 1.0;
     const label = interpretWeight(val);
     const bar = weightBar(val);
-    lines.push(`  ${signal.padEnd(24)} ${val.toFixed(2)}  ${bar}  ${label}`);
+    const direction = dirs[signal] || "unknown";
+    const dirLabel = formatDirection(val, direction);
+    lines.push(`  ${signal.padEnd(24)} ${val.toFixed(2)}  ${bar}  ${label} ${dirLabel}`);
   }
 
   if (data.last_recalc) {
@@ -393,6 +446,22 @@ function interpretWeight(val) {
   if (val >= 0.8) return "[neutral]";
   if (val >= 0.5) return "[below avg]";
   return "[weak]";
+}
+
+/**
+ * Format direction info for LLM consumption.
+ * Examples:
+ *   "↑ higher=better"   — high values of this signal predict wins
+ *   "↓ lower=better"    — low values predict wins
+ *   "↑ present=better"  — boolean signal: presence predicts wins
+ *   "? unknown"          — not yet computed
+ */
+function formatDirection(weight, direction) {
+  if (direction === "higher") return "↑ higher=better";
+  if (direction === "lower") return "↓ lower=better";
+  if (direction === "present=better") return "↑ present=better";
+  if (direction === "absent=better") return "↓ absent=better";
+  return "? unknown";
 }
 
 function weightBar(val) {

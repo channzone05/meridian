@@ -16,6 +16,7 @@ import {
   setPromptSectionOverride,
   clearPromptSectionOverride,
 } from "./prompt.js";
+import { loadWeights } from "./signal-weights.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const AUTORESEARCH_FILE = path.join(__dirname, "autoresearch.json");
@@ -27,6 +28,7 @@ const DEFAULTS = {
   experiments: [],       // history of all experiments
   active: null,          // currently running experiment (or null)
   cooldownRemaining: 0,  // closes remaining before next experiment
+  kept_overrides: {},    // section → text for permanently kept experiment overrides
 };
 
 export function loadAutoresearch() {
@@ -35,7 +37,9 @@ export function loadAutoresearch() {
     return { ...DEFAULTS };
   }
   try {
-    return JSON.parse(fs.readFileSync(AUTORESEARCH_FILE, "utf8"));
+    const data = JSON.parse(fs.readFileSync(AUTORESEARCH_FILE, "utf8"));
+    // Merge with DEFAULTS so existing files gain new fields (e.g. kept_overrides)
+    return { ...DEFAULTS, ...data };
   } catch {
     return { ...DEFAULTS };
   }
@@ -54,6 +58,14 @@ export function saveAutoresearch(data) {
  */
 try {
   const state = loadAutoresearch();
+  // First restore all kept overrides so they survive restarts
+  if (state.kept_overrides) {
+    for (const [section, text] of Object.entries(state.kept_overrides)) {
+      setPromptSectionOverride(section, text);
+      log("autoresearch", `Restored kept override: ${section}`);
+    }
+  }
+  // Then restore the active experiment (overrides the kept one for that section)
   if (state.active?.modified_text && state.active?.section) {
     setPromptSectionOverride(state.active.section, state.active.modified_text);
     log("autoresearch", `Restored active experiment override: ${state.active.id} (${state.active.section})`);
@@ -114,7 +126,16 @@ async function analyzeAndGenerate(perfData, lessons, cfg, state) {
     } else if ((p.range_efficiency ?? 100) < 30) {
       sectionLosses.range_selection.push(p);
     } else if (reason.includes("oor upside")) {
-      sectionLosses.range_selection.push(p);
+      // OOR upside on single-sided-below (bid_ask, SOL-only spot) is a
+      // STRATEGY problem, not a range problem — wider range only adds bins
+      // below and literally cannot catch upside moves.  Attribute to screener
+      // so the LLM considers strategy changes, not range widening.
+      const strat = (p.strategy || "").toLowerCase();
+      if (strat.includes("bid_ask") || strat === "spot") {
+        sectionLosses.screener_criteria.push(p);
+      } else {
+        sectionLosses.range_selection.push(p);
+      }
     } else {
       sectionLosses.screener_criteria.push(p);
     }
@@ -199,6 +220,16 @@ async function analyzeAndGenerate(perfData, lessons, cfg, state) {
     status: "active",
   };
 
+  // Snapshot current Darwin signal weights for audit trail.
+  // NOTE: If Darwin adjusts weights during this experiment, the trial results
+  // may be confounded — we cannot fully isolate prompt changes from weight
+  // changes. This snapshot at least records the starting conditions.
+  try {
+    experiment.weights_at_start = loadWeights().weights;
+  } catch {
+    experiment.weights_at_start = null;
+  }
+
   state.active = experiment;
   saveAutoresearch(state);
 
@@ -221,8 +252,17 @@ async function evaluateExperiment(perfData, cfg, state) {
   const declinePct = cfg.autoresearch?.declinePct ?? 15;
   const cooldownCloses = cfg.autoresearch?.cooldownCloses ?? 5;
 
-  // Positions closed since experiment started
-  const trialPositions = perfData.slice(experiment.started_at_position);
+  // Positions closed since experiment started, filtered to only include those
+  // actually DEPLOYED after the experiment began. Positions deployed before the
+  // experiment but closed after it started would contaminate trial results since
+  // the prompt change couldn't have influenced their deployment decision.
+  const trialPositions = perfData.slice(experiment.started_at_position)
+    .filter(p => {
+      // Only count positions actually deployed AFTER the experiment started
+      const deployedAt = p.deployed_at;
+      if (!deployedAt) return true; // no deploy timestamp, include by default
+      return deployedAt >= experiment.started_at;
+    });
   const trialCount = trialPositions.length;
 
   experiment.trial.positions = trialCount;
@@ -253,32 +293,41 @@ async function evaluateExperiment(perfData, cfg, state) {
   experiment.trial.win_rate = Math.round(trialWR * 10) / 10;
   experiment.trial.avg_pnl_pct = Math.round(trialAvgPnl * 100) / 100;
 
-  // Compare to baseline
+  // Compare to baseline using composite score: 60% win rate + 40% avg PnL
   const baselineWR = experiment.baseline.win_rate;
-  const improvement = ((trialWR - baselineWR) / Math.max(baselineWR, 1)) * 100;
+  const wrImprovement = ((trialWR - baselineWR) / Math.max(baselineWR, 1)) * 100;
 
-  log("autoresearch", `Experiment ${experiment.id}: trial WR ${trialWR.toFixed(1)}% vs baseline ${baselineWR.toFixed(1)}% (improvement: ${improvement.toFixed(1)}%)`);
+  const baselinePnl = experiment.baseline.avg_pnl_pct;
+  const pnlImprovement = baselinePnl !== 0
+    ? ((trialAvgPnl - baselinePnl) / Math.max(Math.abs(baselinePnl), 0.1)) * 100
+    : (trialAvgPnl > 0 ? 100 : trialAvgPnl < 0 ? -100 : 0);
 
-  if (improvement >= improvementPct) {
+  const compositeImprovement = (wrImprovement * 0.6) + (pnlImprovement * 0.4);
+
+  log("autoresearch", `Experiment ${experiment.id}: trial WR ${trialWR.toFixed(1)}% vs baseline ${baselineWR.toFixed(1)}% (WR improvement: ${wrImprovement.toFixed(1)}%, PnL improvement: ${pnlImprovement.toFixed(1)}%, composite: ${compositeImprovement.toFixed(1)}%)`);
+
+  if (compositeImprovement >= improvementPct) {
     // KEEP — the modification helped
-    log("autoresearch", `KEEPING experiment ${experiment.id} — ${improvement.toFixed(1)}% improvement`);
+    log("autoresearch", `KEEPING experiment ${experiment.id} — composite ${compositeImprovement.toFixed(1)}% improvement (WR: ${wrImprovement.toFixed(1)}%, PnL: ${pnlImprovement.toFixed(1)}%)`);
     experiment.status = "kept";
-    // The override stays active permanently — it's now the new prompt
+    // Persist the kept override so it survives restarts
+    if (!state.kept_overrides) state.kept_overrides = {};
+    state.kept_overrides[experiment.section] = experiment.modified_text;
     // Log as lesson
-    logExperimentLesson(experiment, "kept", improvement);
+    logExperimentLesson(experiment, "kept", compositeImprovement);
     state.experiments.push(experiment);
     state.active = null;
     state.cooldownRemaining = cooldownCloses;
     saveAutoresearch(state);
-  } else if (improvement <= -declinePct) {
+  } else if (compositeImprovement <= -declinePct) {
     // REVERT — the modification hurt
-    log("autoresearch", `REVERTING experiment ${experiment.id} — ${improvement.toFixed(1)}% decline`);
-    logExperimentLesson(experiment, "reverted", improvement);
+    log("autoresearch", `REVERTING experiment ${experiment.id} — composite ${compositeImprovement.toFixed(1)}% decline (WR: ${wrImprovement.toFixed(1)}%, PnL: ${pnlImprovement.toFixed(1)}%)`);
+    logExperimentLesson(experiment, "reverted", compositeImprovement);
     finishExperiment(state, "reverted", cooldownCloses);
   } else {
     // INCONCLUSIVE — revert to be safe
-    log("autoresearch", `DISCARDING experiment ${experiment.id} — inconclusive (${improvement.toFixed(1)}%)`);
-    logExperimentLesson(experiment, "inconclusive", improvement);
+    log("autoresearch", `DISCARDING experiment ${experiment.id} — inconclusive (composite: ${compositeImprovement.toFixed(1)}%, WR: ${wrImprovement.toFixed(1)}%, PnL: ${pnlImprovement.toFixed(1)}%)`);
+    logExperimentLesson(experiment, "inconclusive", compositeImprovement);
     finishExperiment(state, "inconclusive", cooldownCloses);
   }
 }
@@ -288,7 +337,13 @@ function finishExperiment(state, status, cooldownCloses) {
   if (!experiment) return;
 
   experiment.status = status;
-  clearPromptSectionOverride(experiment.section);
+  // If this section has a kept override, restore it instead of clearing entirely
+  const keptText = state.kept_overrides?.[experiment.section];
+  if (keptText) {
+    setPromptSectionOverride(experiment.section, keptText);
+  } else {
+    clearPromptSectionOverride(experiment.section);
+  }
   state.experiments.push(experiment);
   state.active = null;
   state.cooldownRemaining = cooldownCloses;
@@ -322,8 +377,9 @@ KEY DOMAIN KNOWLEDGE for your modifications:
 - STRATEGIES: The agent can deploy "bid_ask" (single-sided SOL below price — earns fees on sell pressure, safe but goes idle if price pumps UP) or "spot" with sol_split_pct (two-sided, e.g. 80% SOL / 20% token — captures fees in both directions, better for pumping tokens but riskier if token dumps).
 - OOR UPSIDE: Price pumped above the position range. For bid_ask, SOL sits idle earning nothing. Spot two-sided would have captured fees on the way up.
 - OOR DOWNSIDE: Price dropped below the position range. SOL converted to token, real loss. Wider range helps stay in range longer.
-- If failures show repeated "OOR upside" with bid_ask, consider switching to spot with high sol_split_pct (80-90) for those pool types.
+- If failures show repeated "OOR upside" with bid_ask, consider switching to spot with high sol_split_pct (80-90) for those pool types, or improving screener criteria to avoid deploying into tokens that are mid-pump.
 - If failures show "OOR downside", consider widening price_range_pct or tightening screening thresholds.
+- HARD RULE: NEVER propose widening price_range_pct to fix OOR upside on bid_ask or SOL-only spot strategies. These strategies place bins BELOW the active bin only — wider range adds more bins below, which CANNOT reach a price that pumped ABOVE. This is a physical impossibility, not a tuning problem. If OOR upside is the issue, the fix is strategy selection or screener criteria, never range width.
 - The agent has signal weights showing which screening signals predict wins (organic_score, fee_tvl_ratio, mcap are strong; holder_count, volume are weak).`;
 
   const userMsg = `Section "${sectionName}" has caused ${lossCount} recent losses.

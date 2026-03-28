@@ -47,7 +47,13 @@ export function getRangeSelectionText(deployAmount, currentBalanceSol) {
 }
 
 function _defaultRangeSelectionText(deployAmount, currentBalanceSol) {
-  return `- RANGE: Start with avg_range_pct from study_top_lpers, then adjust using your MEMORY and LESSONS. If you've been burned by OOR at the study range before, go wider. Your own experience overrides historical averages. Default to 35% if no study data.
+  return `- RANGE: Start with avg_range_pct from study_top_lpers, then adjust using your MEMORY and LESSONS. Your own experience overrides historical averages. Default to 35% if no study data.
+- OOR DIRECTION MATTERS — widening range only helps if OOR matches the direction your liquidity extends:
+  * bid_ask (SOL below active bin): range extends DOWNWARD only. Wider range helps with DOWNSIDE OOR. Widening CANNOT fix upside OOR — price pumped above your liquidity and no amount of extra bins below will reach it.
+  * If you keep going OOR-upside on bid_ask, the problem is NOT range width — the token is pumping away from your position. Either wait for the pump to end, use a two-sided strategy with token exposure (sol_split_pct < 100), or skip the pool entirely.
+  * spot (SOL-only, bins below): same as bid_ask — wider only helps downside OOR.
+  * spot (two-sided): wider range helps BOTH directions since liquidity spans above and below.
+  * NEVER generate a lesson saying "use wider range" for upside OOR on a single-sided-below strategy. That analysis is fundamentally wrong.
 - COMPOUNDING: Deploy amount is ${deployAmount} SOL (scaled from wallet: ${currentBalanceSol ?? "?"} SOL). Do NOT override with a smaller amount.
 - After deploy: update_config setting=managementIntervalMin based on volatility (>=5→3, 2-5→5, <2→10).
 - Report: strategy chosen + why, price_range_pct used + source (study data or default), deploy amount, interval set.`;
@@ -93,6 +99,7 @@ function _defaultManagerLogic() {
   * Upside OOR + negative PnL → HOLD. Still safe, SOL idle. Negative PnL is from fees/slippage.
   * Downside OOR + positive PnL → CAUTION. Fees outpaced IL but risk growing. Monitor closely.
   * Downside OOR + negative PnL → CLOSE. Token dropping, loss growing, cut it.
+  * CRITICAL: If a bid_ask or SOL-only position keeps going OOR-upside repeatedly, the problem is the token pumping away — NOT your range width. Widening bid_ask range only adds bins BELOW, which cannot catch upside moves. Do NOT add lessons recommending "wider range" for upside OOR on single-sided-below strategies.
 - Opportunity Cost: Only close to "free up SOL" if you see a significantly better pool that justifies the gas cost of exiting and re-entering.`;
 }
 
