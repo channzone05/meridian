@@ -11,24 +11,79 @@ const LPAGENT_KEYS = (process.env.LPAGENT_API_KEY || "")
   .map((k) => k.trim())
   .filter(Boolean);
 
-let _keyIndex = 0;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Round-robin key selection — spreads requests across keys to avoid per-key rate limits. */
-function nextKey() {
-  if (LPAGENT_KEYS.length === 0) return null;
-  const key = LPAGENT_KEYS[_keyIndex % LPAGENT_KEYS.length];
-  _keyIndex++;
-  return key;
+// ─── Per-key rate limiter (5 RPM per key) ───────────────────
+const RATE_LIMIT_PER_KEY = 5;
+const RATE_WINDOW_MS = 60_000;
+const _keyCallTimes = new Map(); // key → [timestamps]
+
+/**
+ * Pick the key with the most remaining capacity.
+ * If all keys are exhausted, returns { key, waitMs } so caller can sleep.
+ */
+function acquireKey() {
+  if (LPAGENT_KEYS.length === 0) return { key: null, waitMs: 0 };
+
+  const now = Date.now();
+  let bestKey = null;
+  let bestRemaining = -1;
+  let shortestWait = Infinity;
+
+  for (const key of LPAGENT_KEYS) {
+    const calls = _keyCallTimes.get(key) || [];
+    // Prune calls older than the window
+    const recent = calls.filter(t => now - t < RATE_WINDOW_MS);
+    _keyCallTimes.set(key, recent);
+
+    const remaining = RATE_LIMIT_PER_KEY - recent.length;
+    if (remaining > bestRemaining) {
+      bestRemaining = remaining;
+      bestKey = key;
+    }
+    if (remaining <= 0 && recent.length > 0) {
+      // How long until the oldest call in this key's window expires
+      const wait = RATE_WINDOW_MS - (now - recent[0]);
+      if (wait < shortestWait) shortestWait = wait;
+    }
+  }
+
+  if (bestRemaining > 0) {
+    // Record the call
+    const calls = _keyCallTimes.get(bestKey) || [];
+    calls.push(now);
+    _keyCallTimes.set(bestKey, calls);
+    return { key: bestKey, waitMs: 0 };
+  }
+
+  // All keys exhausted — return the shortest wait
+  return { key: bestKey, waitMs: Math.max(shortestWait, 1000) };
 }
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * Get a key, waiting if all keys are rate-limited.
+ * Returns the API key string, or null if no keys configured.
+ */
+async function getKey() {
+  const { key, waitMs } = acquireKey();
+  if (!key) return null;
+  if (waitMs > 0) {
+    await sleep(waitMs);
+    // After waiting, record the call for the key we'll use
+    const now = Date.now();
+    const calls = (_keyCallTimes.get(key) || []).filter(t => now - t < RATE_WINDOW_MS);
+    calls.push(now);
+    _keyCallTimes.set(key, calls);
+  }
+  return key;
+}
 
 /**
  * Fetch top LPers for a pool, filter to credible performers,
  * and return condensed behaviour patterns for LLM consumption.
  */
 export async function studyTopLPers({ pool_address, limit = 4 }) {
-  const apiKey = nextKey();
+  const apiKey = await getKey();
   if (!apiKey) {
     return { pool: pool_address, message: "LPAGENT_API_KEY not set in .env — study_top_lpers is disabled.", patterns: [], lpers: [] };
   }
@@ -74,13 +129,11 @@ export async function studyTopLPers({ pool_address, limit = 4 }) {
 
   for (const lper of top) {
     try {
-      // Small buffer to avoid race conditions on the 5-req limit
-      await sleep(1000);
-
       // LP Agent: historical positions (strategy, hold time, PnL, fees)
+      const histKey = await getKey();
       const histRes = await fetch(
         `${LPAGENT_API}/lp-positions/historical?owner=${lper.owner}&page=1&limit=50`,
-        { headers: { "x-api-key": nextKey() } }
+        { headers: { "x-api-key": histKey } }
       );
       const lpAgentPositions = histRes.ok ? (await histRes.json()).data || [] : [];
 
@@ -228,22 +281,7 @@ export async function studyTopLPers({ pool_address, limit = 4 }) {
   };
 }
 
-// ─── Rate limiter for LP Agent API (5 req/min) ─────────────
-const _lpagentCalls = [];
-
-function checkRateLimit() {
-  const now = Date.now();
-  // Remove calls older than 60 seconds
-  while (_lpagentCalls.length > 0 && now - _lpagentCalls[0] > 60_000) {
-    _lpagentCalls.shift();
-  }
-  if (_lpagentCalls.length >= 5) {
-    const waitSec = Math.ceil((60_000 - (now - _lpagentCalls[0])) / 1000);
-    return { allowed: false, waitSec };
-  }
-  _lpagentCalls.push(now);
-  return { allowed: true };
-}
+// Old global rate limiter removed — replaced by per-key acquireKey/getKey above
 
 // ─── Pool Info (deep intel) ─────────────────────────────────
 
@@ -252,14 +290,9 @@ function checkRateLimit() {
  * Auto-stores key facts in nuggets memory.
  */
 export async function getPoolInfo({ pool_address }) {
-  const apiKey = nextKey();
+  const apiKey = await getKey();
   if (!apiKey) {
     return { error: "LPAGENT_API_KEY not set — get_pool_info is disabled." };
-  }
-
-  const rateCheck = checkRateLimit();
-  if (!rateCheck.allowed) {
-    return { error: `Rate limited (5/min). Try again in ${rateCheck.waitSec}s.` };
   }
 
   const res = await fetch(
