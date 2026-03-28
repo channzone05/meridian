@@ -60,8 +60,13 @@ function acquireKey() {
   return { key: bestKey, waitMs: Math.max(shortestWait, 1000) };
 }
 
+// Minimum gap between ANY LP Agent request (anti-burst)
+const MIN_REQUEST_GAP_MS = 2000;
+let _lastRequestAt = 0;
+
 /**
  * Get a key, waiting if all keys are rate-limited.
+ * Also enforces a minimum gap between requests to avoid burst 429s.
  * Returns the API key string, or null if no keys configured.
  */
 async function getKey() {
@@ -75,7 +80,34 @@ async function getKey() {
     calls.push(now);
     _keyCallTimes.set(key, calls);
   }
+  // Enforce minimum gap between any two requests
+  const elapsed = Date.now() - _lastRequestAt;
+  if (elapsed < MIN_REQUEST_GAP_MS) {
+    await sleep(MIN_REQUEST_GAP_MS - elapsed);
+  }
+  _lastRequestAt = Date.now();
   return key;
+}
+
+/**
+ * Fetch with automatic 429 retry. Waits and retries up to 2 times.
+ */
+async function fetchWithRetry(url, opts, maxRetries = 2) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const res = await fetch(url, opts);
+    if (res.status !== 429) return res;
+    if (attempt < maxRetries) {
+      const waitSec = 15 * (attempt + 1); // 15s, 30s
+      await sleep(waitSec * 1000);
+      // Swap to a fresh key for the retry
+      const freshKey = await getKey();
+      if (freshKey) opts.headers["x-api-key"] = freshKey;
+    }
+  }
+  // Final attempt was also 429
+  const err = new Error("Rate limit exceeded after retries. All API keys exhausted.");
+  err.status = 429;
+  throw err;
 }
 
 /**
@@ -89,15 +121,12 @@ export async function studyTopLPers({ pool_address, limit = 4 }) {
   }
 
   // ── 1. Top LPers for this pool ──────────────────────────────
-  const topRes = await fetch(
+  const topRes = await fetchWithRetry(
     `${LPAGENT_API}/pools/${pool_address}/top-lpers?sort_order=desc&page=1&limit=20`,
     { headers: { "x-api-key": apiKey } }
   );
 
   if (!topRes.ok) {
-    if (topRes.status === 429) {
-      throw new Error(`Rate limit exceeded. Please wait 60 seconds before studying this pool again.`);
-    }
     throw new Error(`top-lpers API error: ${topRes.status}`);
   }
 
@@ -131,7 +160,7 @@ export async function studyTopLPers({ pool_address, limit = 4 }) {
     try {
       // LP Agent: historical positions (strategy, hold time, PnL, fees)
       const histKey = await getKey();
-      const histRes = await fetch(
+      const histRes = await fetchWithRetry(
         `${LPAGENT_API}/lp-positions/historical?owner=${lper.owner}&page=1&limit=50`,
         { headers: { "x-api-key": histKey } }
       );
@@ -295,13 +324,12 @@ export async function getPoolInfo({ pool_address }) {
     return { error: "LPAGENT_API_KEY not set — get_pool_info is disabled." };
   }
 
-  const res = await fetch(
+  const res = await fetchWithRetry(
     `${LPAGENT_API}/pools/${pool_address}/info`,
     { headers: { "x-api-key": apiKey } }
   );
 
   if (!res.ok) {
-    if (res.status === 429) return { error: "Rate limited by LP Agent API. Wait 60s." };
     throw new Error(`Pool info API error: ${res.status}`);
   }
 
