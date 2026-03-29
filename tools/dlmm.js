@@ -669,6 +669,15 @@ export async function getMyPositions({ force = false } = {}) {
 
     log("positions", lpAgentPositions ? `LP Agent: ${lpAgentPositions.size} positions` : "LP Agent unavailable, using Meteora fallback");
 
+    // When using LP Agent, fetch Meteora PnL API just for OOR/active bin data.
+    // LP Agent's inRange can be stale and it doesn't provide poolActiveBinId.
+    // Meteora datapi has no rate limit and returns accurate on-chain state.
+    let meteoraOorData = {};
+    if (lpAgentPositions) {
+      const oorMaps = await Promise.all(uniquePools.map(pool => fetchDlmmPnlForPool(pool, walletAddress)));
+      uniquePools.forEach((pool, i) => { meteoraOorData[pool] = oorMaps[i]; });
+    }
+
     // SOL price for conversion (one fetch, shared across all positions)
     const solPrice = walletBalResult.sol_price || 0;
     const toSol = (usd) => solPrice > 0 ? Math.round((usd / solPrice) * 10000) / 10000 : null;
@@ -690,9 +699,19 @@ export async function getMyPositions({ force = false } = {}) {
 
       const lowerBin  = p?.lowerBinId      ?? r.lower_bin;
       const upperBin  = p?.upperBinId      ?? r.upper_bin;
-      const activeBin = p?.poolActiveBinId ?? null;
+      // Use Meteora active bin (accurate, no rate limit) over LP Agent's stale data
+      const meteoraPos = meteoraOorData[r.pool]?.[r.position];
+      const activeBin = meteoraPos?.poolActiveBinId ?? p?.poolActiveBinId ?? null;
 
-      const inRange = p ? !p.isOutOfRange : true;
+      // Compute in-range from Meteora (authoritative) rather than LP Agent's stale flag
+      let inRange;
+      if (meteoraPos) {
+        inRange = !meteoraPos.isOutOfRange;
+      } else if (activeBin != null && lowerBin != null && upperBin != null) {
+        inRange = activeBin >= lowerBin && activeBin <= upperBin;
+      } else {
+        inRange = p ? !p.isOutOfRange : true;
+      }
       // Compute OOR direction: upside = price pumped above range, downside = price dropped below
       let oorDirection = null;
       if (!inRange && activeBin != null && upperBin != null && lowerBin != null) {
