@@ -493,6 +493,16 @@ async function fetchLpAgentOpenPositions(walletAddress) {
   }
 }
 
+/** Map LP Agent strategy names → our internal terms */
+function mapLpaStrategy(lpaType) {
+  if (!lpaType) return null;
+  const t = lpaType.toLowerCase();
+  if (t.includes("bidask")) return "bid_ask";
+  if (t.includes("spot")) return "spot";
+  if (t.includes("curve")) return "curve";
+  return lpaType; // pass through unknown types
+}
+
 /**
  * Normalize LP Agent position data → Meteora-compatible field names
  * so downstream enrichment code works identically regardless of source.
@@ -528,7 +538,7 @@ function normalizeLpAgentPosition(lpa) {
     _lpa_inRange: lpa.inRange,
     _lpa_dpr: lpa.dpr,
     _lpa_ageHour: lpa.ageHour,
-    _lpa_strategy: lpa.strategyType,
+    _lpa_strategy: mapLpaStrategy(lpa.strategyType),
     _lpa_pairName: lpa.pairName,
     _lpa_source: "lpagent",
   };
