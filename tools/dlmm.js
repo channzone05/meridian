@@ -369,6 +369,8 @@ export async function deployPosition({
       pool_name,
       base_mint: pool.lbPair.tokenXMint.toBase58(),
       strategy: activeStrategy,
+      strategy_type: activeStrategy === "bid_ask" ? "BidAsk" : (sol_split_pct === 100 ? "SpotOneSide" : "SpotTwoSide"),
+      sol_split_pct: sol_split_pct ?? (activeStrategy === "bid_ask" ? 100 : null),
       bin_range: { min: minBinId, max: maxBinId, bins_below: activeBinsBelow, bins_above: activeBinsAbove },
       bin_step: resolvedBinStep,
       volatility,
@@ -807,12 +809,33 @@ export async function getMyPositions({ force = false } = {}) {
       const totalValRounded = Math.round(totalValue * 100) / 100;
       const collectedRounded = Math.round(collectedFees * 100) / 100;
 
+      // Composition: current token vs SOL amounts and USD split from LP Agent
+      let composition = null;
+      const lpaRaw = lpAgentPositions?.get(r.position);
+      if (lpaRaw?.current) {
+        const tokenAmt = lpaRaw.current.amount0Adjusted ?? 0;
+        const solAmt = lpaRaw.current.amount1Adjusted ?? 0;
+        const tokenUsd = tokenAmt * (lpaRaw.price0 || 0);
+        const solUsd = solAmt * (lpaRaw.price1 || 0);
+        const totalUsd = tokenUsd + solUsd;
+        const solPct = totalUsd > 0 ? Math.round((solUsd / totalUsd) * 100) : 100;
+        composition = {
+          token_amount: Math.round(tokenAmt * 100) / 100,
+          sol_amount: Math.round(solAmt * 10000) / 10000,
+          token_usd: Math.round(tokenUsd * 100) / 100,
+          sol_usd: Math.round(solUsd * 100) / 100,
+          sol_pct: solPct,
+          token_pct: 100 - solPct,
+        };
+      }
+
       return {
         position: r.position,
         pool: r.pool,
         pair: r.pair,
         base_mint: r.base_mint,
         strategy: trackedFinal?.strategy || "bid_ask",
+        strategy_type: p?._lpa_strategy || null,
         bin_step: trackedFinal?.bin_step || null,
         volatility: trackedFinal?.volatility || null,
         lower_bin: lowerBin,
@@ -820,6 +843,7 @@ export async function getMyPositions({ force = false } = {}) {
         active_bin: activeBin,
         in_range: inRange,
         oor_direction: oorDirection,
+        composition,
         unclaimed_fees_usd: unclaimedRounded,
         unclaimed_fees_sol: toSol(unclaimedRounded),
         total_value_usd: totalValRounded,
@@ -1101,6 +1125,8 @@ export async function closePosition({ position_address, _pnlOverride = null }) {
         pool: poolAddress,
         pool_name: tracked.pool_name || poolAddress.slice(0, 8),
         strategy: tracked.strategy,
+        strategy_type: tracked.strategy_type || null,
+        sol_split_pct: tracked.sol_split_pct || null,
         bin_range: tracked.bin_range,
         bin_step: tracked.bin_step || null,
         volatility: tracked.volatility || null,

@@ -4,22 +4,13 @@
  */
 
 import { log } from "../logger.js";
+import { getKey as getApiKey } from "../lpagent-keys.js";
 
 const LPAGENT_API = "https://api.lpagent.io/open-api/v1";
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 let _cache = null;
 let _cacheAt = 0;
-
-const _keys = (process.env.LPAGENT_API_KEY || "").split(",").map(k => k.trim()).filter(Boolean);
-let _keyIdx = 0;
-
-function getApiKey() {
-  if (_keys.length === 0) return null;
-  const key = _keys[_keyIdx % _keys.length];
-  _keyIdx++;
-  return key;
-}
 
 async function getWalletAddress() {
   const bs58 = (await import("bs58")).default;
@@ -39,7 +30,7 @@ export async function getLpOverview({ force = false } = {}) {
     return _cache;
   }
 
-  const apiKey = getApiKey();
+  const apiKey = await getApiKey();
   if (!apiKey) return _cache || null;
 
   try {
@@ -154,7 +145,7 @@ function formatHistoricalPosition(match, useSol) {
 
 /** Fetch the raw historical positions list from LP Agent (max 50). Returns [] on failure. */
 async function fetchHistoricalRaw() {
-  const apiKey = getApiKey();
+  const apiKey = await getApiKey();
   if (!apiKey) return [];
   try {
     const owner = await getWalletAddress();
