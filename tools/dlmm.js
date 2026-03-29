@@ -576,6 +576,26 @@ export async function getPositionPnl({ pool_address, position_address }) {
     const pnlUsdVal       = Math.round((p.pnlUsd ?? 0) * 100) / 100;
     const allTimeFeesUsd  = Math.round(parseFloat(p.allTimeFees?.total?.usd || 0) * 100) / 100;
 
+    // Get accurate active bin from Meteora (LP Agent doesn't provide it)
+    let activeBin = p.poolActiveBinId ?? null;
+    if (activeBin == null) {
+      try {
+        const meteoraData = await fetchDlmmPnlForPool(pool_address, walletAddress);
+        const anyPos = Object.values(meteoraData)[0];
+        if (anyPos?.poolActiveBinId != null) activeBin = anyPos.poolActiveBinId;
+      } catch { /* best-effort */ }
+    }
+
+    // Compute in-range from active bin (authoritative) rather than LP Agent's stale flag
+    const lowerBin = p.lowerBinId ?? null;
+    const upperBin = p.upperBinId ?? null;
+    let inRange;
+    if (activeBin != null && lowerBin != null && upperBin != null) {
+      inRange = activeBin >= lowerBin && activeBin <= upperBin;
+    } else {
+      inRange = !p.isOutOfRange;
+    }
+
     // SOL conversion
     let solPrice = 0;
     try { solPrice = (await getWalletBalances()).sol_price || 0; } catch { /* best-effort */ }
@@ -593,10 +613,10 @@ export async function getPositionPnl({ pool_address, position_address }) {
       all_time_fees_sol: toSol(allTimeFeesUsd),
       sol_price:   solPrice,
       pnl_unit:    config.management.pnlUnit,
-      in_range:    !p.isOutOfRange,
-      lower_bin:   p.lowerBinId      ?? null,
-      upper_bin:   p.upperBinId      ?? null,
-      active_bin:  p.poolActiveBinId ?? null,
+      in_range:    inRange,
+      lower_bin:   lowerBin,
+      upper_bin:   upperBin,
+      active_bin:  activeBin,
       age_minutes: p.createdAt ? Math.floor((Date.now() - p.createdAt * 1000) / 60000) : null,
       _source:     source,
     };
