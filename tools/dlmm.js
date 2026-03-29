@@ -433,16 +433,8 @@ async function fetchDlmmPnlForPool(poolAddress, walletAddress) {
 }
 
 // ─── LP Agent PnL API (primary PnL source) ─────────────────────
+import { getKey as getLpaKey } from "../lpagent-keys.js";
 const LPAGENT_API = "https://api.lpagent.io/open-api/v1";
-const _lpaKeys = (process.env.LPAGENT_API_KEY || "").split(",").map(k => k.trim()).filter(Boolean);
-let _lpaKeyIdx = 0;
-
-function _nextLpaKey() {
-  if (_lpaKeys.length === 0) return null;
-  const key = _lpaKeys[_lpaKeyIdx % _lpaKeys.length];
-  _lpaKeyIdx++;
-  return key;
-}
 
 // Short-lived cache: single LP Agent call serves getMyPositions + getPositionPnl
 let _lpaCache = null;     // Map<positionAddress, lpAgentData>
@@ -460,7 +452,7 @@ async function fetchLpAgentOpenPositions(walletAddress) {
     return _lpaCache;
   }
 
-  const apiKey = _nextLpaKey();
+  const apiKey = await getLpaKey();
   if (!apiKey) return null;
 
   try {
