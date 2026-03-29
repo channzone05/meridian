@@ -685,9 +685,17 @@ export async function getMyPositions({ force = false } = {}) {
     // LP Agent's inRange can be stale and it doesn't provide poolActiveBinId.
     // Meteora datapi has no rate limit and returns accurate on-chain state.
     let meteoraOorData = {};
+    let meteoraActiveBinByPool = {};  // pool → activeBinId (same for all positions in a pool)
     if (lpAgentPositions) {
       const oorMaps = await Promise.all(uniquePools.map(pool => fetchDlmmPnlForPool(pool, walletAddress)));
-      uniquePools.forEach((pool, i) => { meteoraOorData[pool] = oorMaps[i]; });
+      uniquePools.forEach((pool, i) => {
+        meteoraOorData[pool] = oorMaps[i];
+        // Extract poolActiveBinId from ANY position in this pool — it's pool-level, not position-level
+        const anyPos = Object.values(oorMaps[i] || {})[0];
+        if (anyPos?.poolActiveBinId != null) {
+          meteoraActiveBinByPool[pool] = anyPos.poolActiveBinId;
+        }
+      });
     }
 
     // SOL price for conversion (one fetch, shared across all positions)
@@ -711,16 +719,21 @@ export async function getMyPositions({ force = false } = {}) {
 
       const lowerBin  = p?.lowerBinId      ?? r.lower_bin;
       const upperBin  = p?.upperBinId      ?? r.upper_bin;
-      // Use Meteora active bin (accurate, no rate limit) over LP Agent's stale data
+      // Use Meteora active bin (accurate, no rate limit) over LP Agent's stale data.
+      // First try exact position match, then fall back to pool-level active bin
+      // (Meteora sometimes indexes positions under a different address).
       const meteoraPos = meteoraOorData[r.pool]?.[r.position];
-      const activeBin = meteoraPos?.poolActiveBinId ?? p?.poolActiveBinId ?? null;
+      const activeBin = meteoraPos?.poolActiveBinId
+        ?? meteoraActiveBinByPool[r.pool]
+        ?? p?.poolActiveBinId
+        ?? null;
 
-      // Compute in-range from Meteora (authoritative) rather than LP Agent's stale flag
+      // Compute in-range from active bin vs position bin range (authoritative)
       let inRange;
-      if (meteoraPos) {
-        inRange = !meteoraPos.isOutOfRange;
-      } else if (activeBin != null && lowerBin != null && upperBin != null) {
+      if (activeBin != null && lowerBin != null && upperBin != null) {
         inRange = activeBin >= lowerBin && activeBin <= upperBin;
+      } else if (meteoraPos) {
+        inRange = !meteoraPos.isOutOfRange;
       } else {
         inRange = p ? !p.isOutOfRange : true;
       }
