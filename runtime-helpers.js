@@ -14,6 +14,7 @@ export const CONFIG_KEY_MAP = {
   timeframe: ["screening", "timeframe"],
   category: ["screening", "category"],
   minTokenFeesSol: ["screening", "minTokenFeesSol"],
+  athTopThresholdPct: ["screening", "athTopThresholdPct"],
   minClaimAmount: ["management", "minClaimAmount"],
   outOfRangeBinsToClose: ["management", "outOfRangeBinsToClose"],
   outOfRangeWaitMinutes: ["management", "outOfRangeWaitMinutes"],

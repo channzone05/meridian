@@ -22,6 +22,7 @@ import { startPnlWatcher, stopPnlWatcher } from "./pnl-watcher.js";
 import { recordPositionSnapshot as recordPoolSnapshot, recallForPool } from "./pool-memory.js";
 import { checkSmartWalletsOnPool } from "./smart-wallets.js";
 import { getTokenHolders, getTokenNarrative, getTokenInfo } from "./tools/token.js";
+import { fetchOkxPriceInfo } from "./tools/okx.js";
 import {
   sessionHistory, appendHistory, getHistory,
   isBusy, setBusy,
@@ -394,18 +395,21 @@ ${activeStrategy ? `\nSAVED STRATEGY (reference, not mandatory): ${activeStrateg
           dynFeeMap[c.pool] = await fetchDynamicFee(c.pool);
         }
         const blocks = await Promise.allSettled(candidates.map(async (c) => {
-          const [sw, holders, narrative, poolMem, tokenInfo] = await Promise.allSettled([
+          const [sw, holders, narrative, poolMem, tokenInfo, okxData] = await Promise.allSettled([
             checkSmartWalletsOnPool({ pool_address: c.pool }),
             c.base_mint ? getTokenHolders({ mint: c.base_mint }) : null,
             c.base_mint ? getTokenNarrative({ mint: c.base_mint }) : null,
             recallForPool(c.pool),
             c.base_mint ? getTokenInfo({ query: c.base_mint }) : null,
+            c.base_mint ? fetchOkxPriceInfo(c.base_mint) : null,
           ]);
           const swResult = sw.status === "fulfilled" ? sw.value : null;
           const holdResult = holders.status === "fulfilled" ? holders.value : null;
           const narrResult = narrative.status === "fulfilled" ? narrative.value : null;
           const memResult = poolMem.status === "fulfilled" ? poolMem.value : null;
           const infoResult = tokenInfo.status === "fulfilled" ? tokenInfo.value : null;
+          const okxResult = okxData.status === "fulfilled" ? okxData.value : null;
+          c._okxResult = okxResult;  // attach to candidate for signal staging
           const dynFeeResult = dynFeeMap[c.pool] || null;
           const tokenData = infoResult?.results?.[0];
 
@@ -422,6 +426,16 @@ ${activeStrategy ? `\nSAVED STRATEGY (reference, not mandatory): ${activeStrateg
           if (holdResult?.top_10_real_holders_pct != null) block += ` | top10: ${holdResult.top_10_real_holders_pct}%`;
           if (narrResult?.narrative) block += `\n  Narrative: ${narrResult.narrative.slice(0, 500)}`;
           if (memResult) block += `\n  Memory: ${memResult}`;
+          if (okxResult) {
+            block += ` | ath: ${okxResult.ath_proximity_pct ?? "?"}%`;
+            block += ` | momentum: 5m=${okxResult.change_5m ?? "?"}% 1h=${okxResult.change_1h ?? "?"}%`;
+            if (okxResult.ath_proximity_pct != null && okxResult.ath_proximity_pct >= config.screening.athTopThresholdPct) {
+              block += `\n  ATH WARNING: ${okxResult.ath_proximity_pct}% of ATH (>=${config.screening.athTopThresholdPct}%) — override bid_ask range to 65-80%`;
+            }
+            if (okxResult.change_1h > 10 && okxResult.change_5m < -2) {
+              block += `\n  MOMENTUM WARNING: pump fading (1h +${okxResult.change_1h}%, 5m ${okxResult.change_5m}%) — widen range or consider skipping`;
+            }
+          }
           return block;
         }));
         const validBlocks = blocks.filter(b => b.status === "fulfilled").map(b => b.value);
@@ -444,6 +458,7 @@ ${activeStrategy ? `\nSAVED STRATEGY (reference, not mandatory): ${activeStrateg
               narrative_quality: null, // filled by tool signal capture in executor
               study_win_rate: null,    // filled by tool signal capture in executor
               hive_consensus: null,    // filled by hive mind if available
+              ath_proximity: c._okxResult?.ath_proximity_pct ?? null,
             }, c.base_mint || null);
           } catch { /* staging is best-effort */ }
         }

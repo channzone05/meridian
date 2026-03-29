@@ -40,6 +40,7 @@ export const config = {
     timeframe:         u.timeframe         ?? "5m",
     category:          u.category          ?? "trending",
     minTokenFeesSol:   u.minTokenFeesSol   ?? 30,  // global fees paid (priority+jito tips). below = bundled/scam
+    athTopThresholdPct: u.athTopThresholdPct ?? 90,
   },
 
   // ─── Position Management ────────────────
@@ -162,6 +163,7 @@ export function reloadScreeningThresholds() {
     if (fresh.maxPriceChangePct != null) s.maxPriceChangePct = fresh.maxPriceChangePct;
     if (fresh.timeframe      != null) s.timeframe      = fresh.timeframe;
     if (fresh.category       != null) s.category       = fresh.category;
+    if (fresh.athTopThresholdPct != null) s.athTopThresholdPct = fresh.athTopThresholdPct;
     // Also reload management thresholds that evolution may have changed
     const m = config.management;
     if (fresh.stopLossPct           != null) m.stopLossPct           = fresh.stopLossPct;

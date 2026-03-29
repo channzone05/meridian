@@ -254,8 +254,11 @@ function derivLesson(perf) {
 
   if (outcome === "good" || outcome === "bad") {
     if (perf.range_efficiency < 30 && outcome === "bad") {
+      const isSingleSidedBelow = perf.strategy === "bid_ask" || perf.strategy === "spot"; // spot SOL-only also goes below
       const dirHint = oorDir === "downside"
-        ? " Price dropped below range (downside OOR) — SOL converted to token, realized loss."
+        ? " Price dropped below range (downside OOR) — SOL converted to token, realized loss. Wider range may help catch deeper dips."
+        : oorDir === "upside" && isSingleSidedBelow
+        ? " Price pumped above range (upside OOR) — wider range will NOT fix this since bid_ask/SOL-only liquidity only extends downward. Token is pumping away from position. Consider: waiting for pump to end before deploying, using two-sided spot with token exposure, or skipping this pool."
         : oorDir === "upside"
         ? " Price rose above range (upside OOR) — SOL sat idle, missed fees but no IL."
         : "";
@@ -515,6 +518,37 @@ export function evolveThresholds(perfData, config, { userConfig, lessonsData } =
     }
   }
 
+  // ── 8. athTopThresholdPct ─────────────────────────────────────
+  // If positions opened near ATH consistently lose → lower threshold (stricter)
+  // If positions near ATH consistently win → raise threshold (more permissive)
+  {
+    const current = config.screening.athTopThresholdPct ?? 90;
+    const winnersNearAth = winners.filter(p => {
+      const ath = p.signal_snapshot?.ath_proximity;
+      return ath != null && ath >= current;
+    });
+    const losersNearAth = losers.filter(p => {
+      const ath = p.signal_snapshot?.ath_proximity;
+      return ath != null && ath >= current;
+    });
+
+    if (losersNearAth.length >= 2 && winnersNearAth.length === 0) {
+      const target = current - 3;
+      const newVal = clamp(Math.round(nudge(current, target, MAX_CHANGE_PER_STEP)), 75, 98);
+      if (newVal < current) {
+        changes.athTopThresholdPct = newVal;
+        rationale.athTopThresholdPct = `${losersNearAth.length} near-ATH losses, 0 wins — tightened from ${current}% → ${newVal}%`;
+      }
+    } else if (winnersNearAth.length >= 2 && losersNearAth.length === 0) {
+      const target = current + 2;
+      const newVal = clamp(Math.round(nudge(current, target, MAX_CHANGE_PER_STEP)), 75, 98);
+      if (newVal > current) {
+        changes.athTopThresholdPct = newVal;
+        rationale.athTopThresholdPct = `${winnersNearAth.length} near-ATH wins, 0 losses — loosened from ${current}% → ${newVal}%`;
+      }
+    }
+  }
+
   if (Object.keys(changes).length === 0) return { changes: {}, rationale: {} };
 
   // ── Persist changes to user-config.json ───────────────────────
@@ -539,6 +573,7 @@ export function evolveThresholds(perfData, config, { userConfig, lessonsData } =
   if (changes.stopLossPct          != null) m.stopLossPct          = changes.stopLossPct;
   if (changes.takeProfitFeePct     != null) m.takeProfitFeePct     = changes.takeProfitFeePct;
   if (changes.outOfRangeWaitMinutes != null) m.outOfRangeWaitMinutes = changes.outOfRangeWaitMinutes;
+  if (changes.athTopThresholdPct != null) s.athTopThresholdPct = changes.athTopThresholdPct;
 
   // Log a lesson summarizing the evolution
   const ld = lessonsData || load();

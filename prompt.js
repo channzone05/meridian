@@ -62,6 +62,15 @@ function _defaultRangeSelectionText(deployAmount, currentBalanceSol) {
   - If LESSONS show positions staying in range → go tighter for better fee concentration
   - study_top_lpers patterns (hold time, strategy, win rate) are useful context but their avg_range_pct reflects a DIFFERENT market regime — do not copy it
 
+- ATH PROXIMITY OVERRIDE:
+  If candidate shows ath >= ${config.screening.athTopThresholdPct ?? 90}% of all-time high, the token is near its peak with maximum downside risk.
+  Override bid_ask range to 65-80% regardless of volatility table. This provides extra downside buffer for the likely retrace from ATH.
+- MOMENTUM CHECK (5m vs 1h price change):
+  * 1h positive + 5m negative → PUMP FADING: the move is reversing. Widen range or skip.
+  * 1h negative + 5m flat/positive → STABILIZING: good bid_ask entry on sell pressure.
+  * 1h positive + 5m positive → STILL PUMPING: bid_ask SOL will sit idle until sells come.
+  * Both flat → RANGING: safest entry, use volatility table as-is.
+
 - OOR DIRECTION MATTERS — widening range only helps if OOR matches the direction your liquidity extends:
   * bid_ask (SOL below active bin): range extends DOWNWARD only. Wider range helps with DOWNSIDE OOR. Widening CANNOT fix upside OOR — price pumped above your liquidity and no amount of extra bins below will reach it.
   * If you keep going OOR-upside on bid_ask, the problem is NOT range width — the token is pumping away from your position. Either wait for the pump to end, use a two-sided strategy with token exposure (sol_split_pct < 100), or skip the pool entirely.
