@@ -1,0 +1,451 @@
+{
+  "enabled": false,
+  "experiments": [
+    {
+      "id": "exp_1774616331833",
+      "section": "range_selection",
+      "hypothesis": "The losses show repeated “OOR upside” with bid_ask behavior at the study range, so we should widen the default range slightly to stay in-range longer when price pumps.",
+      "original_text": "- RANGE: Start with avg_range_pct from study_top_lpers, then adjust using your MEMORY and LESSONS. If you've been burned by OOR at the study range before, go wider. Your own experience overrides historical averages. Default to 35% if no study data.\n- COMPOUNDING: Deploy amount is ${deployAmount} SOL (scaled from wallet: ${currentBalanceSol} SOL). Do NOT override with a smaller amount.\n- After deploy: update_config setting=managementIntervalMin based on volatility (>=5→3, 2-5→5, <2→10).\n- Report: strategy chosen + why, price_range_pct used + source (study data or default), deploy amount, interval set.",
+      "modified_text": "---\n- RANGE: Start with avg_range_pct from study_top_lpers, then adjust using your MEMORY and LESSONS. If you've been burned by OOR at the study range before, go wider. Your own experience overrides historical averages. Default to **45%** if no study data.\n- COMPOUNDING: Deploy amount is ${deployAmount} SOL (scaled from wallet: ${currentBalanceSol} SOL). Do NOT override with a smaller amount.\n- After deploy: update_config setting=managementIntervalMin based on volatility (>=5→3, 2-5→5, <2→10).\n- Report: strategy chosen + why, price_range_pct used + source (study data or default), deploy amount, interval set.\n---",
+      "started_at": "2026-03-27T12:58:51.833Z",
+      "started_at_position": 264,
+      "baseline": {
+        "win_rate": 28.6,
+        "avg_pnl_pct": 0.9,
+        "positions": 7
+      },
+      "trial": {
+        "win_rate": 71.4,
+        "avg_pnl_pct": 0.32,
+        "positions": 7
+      },
+      "status": "kept"
+    },
+    {
+      "id": "exp_1774633733233",
+      "section": "range_selection",
+      "hypothesis": "Increasing the default range from 45% to 55% will reduce OOR upside failures by giving positions more room to stay in range when token prices pump.",
+      "original_text": "---\n- RANGE: Start with avg_range_pct from study_top_lpers, then adjust using your MEMORY and LESSONS. If you've been burned by OOR at the study range before, go wider. Your own experience overrides historical averages. Default to **45%** if no study data.\n- COMPOUNDING: Deploy amount is ${deployAmount} SOL (scaled from wallet: ${currentBalanceSol} SOL). Do NOT override with a smaller amount.\n- After deploy: update_config setting=managementIntervalMin based on volatility (>=5→3, 2-5→5, <2→10).\n- Report: strategy chosen + why, price_range_pct used + source (study data or default), deploy amount, interval set.\n---",
+      "modified_text": "---\n---\n- RANGE: Start with avg_range_pct from study_top_lpers, then adjust using your MEMORY and LESSONS. If you've been burned by OOR at the study range before, go wider. Your own experience overrides historical averages. Default to **55%** if no study data.\n- COMPOUNDING: Deploy amount is ${deployAmount} SOL (scaled from wallet: ${currentBalanceSol} SOL). Do NOT override with a smaller amount.\n- After deploy: update_config setting=managementIntervalMin based on volatility (>=5→3, 2-5→5, <2→10).\n- Report: strategy chosen + why, price_range_pct used + source (study data or default), deploy amount, interval set.\n---\n---",
+      "started_at": "2026-03-27T17:48:53.233Z",
+      "started_at_position": 277,
+      "baseline": {
+        "win_rate": 42.9,
+        "avg_pnl_pct": -1.79,
+        "positions": 7
+      },
+      "trial": {
+        "win_rate": 71.4,
+        "avg_pnl_pct": 0.76,
+        "positions": 7
+      },
+      "status": "kept"
+    },
+    {
+      "id": "exp_1774653033314",
+      "section": "range_selection",
+      "hypothesis": "Repeated OOR upside indicates the 35% default range is too tight for these pools—when price breaks above range, single-sided SOL earns nothing. Widening the default threshold to 50% gives price more room to stay in range during pumps.",
+      "original_text": "- RANGE: Start with avg_range_pct from study_top_lpers, then adjust using your MEMORY and LESSONS. If you've been burned by OOR at the study range before, go wider. Your own experience overrides historical averages. Default to 35% if no study data.\n- COMPOUNDING: Deploy amount is ${deployAmount} SOL (scaled from wallet: ${currentBalanceSol} SOL). Do NOT override with a smaller amount.\n- After deploy: update_config setting=managementIntervalMin based on volatility (>=5→3, 2-5→5, <2→10).\n- Report: strategy chosen + why, price_range_pct used + source (study data or default), deploy amount, interval set.",
+      "modified_text": "---\n- RANGE: Start with avg_range_pct from study_top_lpers, then adjust using your MEMORY and LESSONS. If you've been burned by OOR at the study range before, go wider. Your own experience overrides historical averages. Default to 50% if no study data.\n- COMPOUNDING: Deploy amount is ${deployAmount} SOL (scaled from wallet: ${currentBalanceSol} SOL). Do NOT override with a smaller amount.\n- After deploy: update_config setting=managementIntervalMin based on volatility (>=5→3, 2-5→5, <2→10).\n- Report: strategy chosen + why, price_range_pct used + source (study data or default), deploy amount, interval set.\n---",
+      "started_at": "2026-03-27T23:10:33.314Z",
+      "started_at_position": 290,
+      "baseline": {
+        "win_rate": 57.1,
+        "avg_pnl_pct": 0.86,
+        "positions": 7
+      },
+      "trial": {
+        "win_rate": 85.7,
+        "avg_pnl_pct": 0.71,
+        "positions": 7
+      },
+      "status": "kept"
+    },
+    {
+      "id": "exp_1774697165473",
+      "section": "screener_criteria",
+      "hypothesis": "Raising the minTokenFeesSol threshold from 30 to 50 SOL will filter out lower-activity pools that generate only negligible fees, forcing the agent to deploy only into pools with stronger organic trading activity that can generate meaningful PnL beyond a few basis points.",
+      "original_text": "1. SCREEN: Use get_top_candidates or discover_pools.\n2. STUDY: Call study_top_lpers. Look for high win rates and sustainable volume. Treat avg_range_pct as a starting point — adjust based on your LESSONS and MEMORY (especially OOR direction patterns from past sessions).\n3. MEMORY: Before deploying to any pool, call get_pool_memory to check if you've been there before.\n4. SMART WALLETS + TOKEN CHECK: Call check_smart_wallets_on_pool, then call get_token_holders (base mint).\n   - global_fees_sol = total priority/jito tips paid by ALL traders on this token (NOT Meteora LP fees — completely different).\n   - HARD SKIP if global_fees_sol < minTokenFeesSol (default 30 SOL). Low fees = bundled txs or scam. No exceptions.\n   - Smart wallets present + fees pass → strong signal, proceed to deploy.\n   - No smart wallets → also call get_token_narrative before deciding:\n     * SKIP if top_10_real_holders_pct > 60% OR bundlers > 30% OR narrative is empty/null/pure hype with no specific story\n     * CAUTION if bundlers 15–30% AND top_10 > 40% — check organic + buy/sell pressure\n     * Bundlers 5–15% are normal, not a skip signal on their own\n     * GOOD narrative: specific origin (real event, viral moment, named entity, active community actions)\n     * BAD narrative: generic hype (\"next 100x\", \"community token\") with no identifiable subject or story\n     * DEPLOY if global_fees_sol passes, distribution is healthy, and narrative has a real specific catalyst\n5. DEPLOY: get_active_bin then deploy_position.\n   - HARD RULE: Minimum 0.1 SOL absolute floor (prefer 0.5+).\n   - COMPOUNDING: Deploy amount is computed from wallet size — larger wallet = larger position. Use the amount provided in the cycle goal, do NOT default to a smaller fixed number.\n   - Focus on one high-conviction deployment per cycle.\n   - BIN STEP SCALING: Lower bin_step pools need MORE bins for the same % range. bin_step 20 needs 5x more bins than bin_step 100. Always calculate: bins = ceil(log(1 - pct) / log(1 + bin_step/10000)). Wide ranges (>69 bins) are handled automatically via multi-tx.",
+      "modified_text": "---\n1. SCREEN: Use get_top_candidates or discover_pools.\n2. STUDY: Call study_top_lpers. Look for high win rates and sustainable volume. Treat avg_range_pct as a starting point — adjust based on your LESSONS and MEMORY (especially OOR direction patterns from past sessions).\n3. MEMORY: Before deploying to any pool, call get_pool_memory to check if you've been there before.\n4. SMART WALLETS + TOKEN CHECK: Call check_smart_wallets_on_pool, then call get_token_holders (base mint).\n   - global_fees_sol = total priority/jito tips paid by ALL traders on this token (NOT Meteora LP fees — completely different).\n   - HARD SKIP if global_fees_sol < minTokenFeesSol (default 50 SOL). Low fees = bundled txs or scam. No exceptions.\n   - Smart wallets present + fees pass → strong signal, proceed to deploy.\n   - No smart wallets → also call get_token_narrative before deciding:\n     * SKIP if top_10_real_holders_pct > 60% OR bundlers > 30% OR narrative is empty/null/pure hype with no specific story\n     * CAUTION if bundlers 15–30% AND top_10 > 40% — check organic + buy/sell pressure\n     * Bundlers 5–15% are normal, not a skip signal on their own\n     * GOOD narrative: specific origin (real event, viral moment, named entity, active community actions)\n     * BAD narrative: generic hype (\"next 100x\", \"community token\") with no identifiable subject or story\n     * DEPLOY if global_fees_sol passes, distribution is healthy, and narrative has a real specific catalyst\n5. DEPLOY: get_active_bin then deploy_position.\n   - HARD RULE: Minimum 0.1 SOL absolute floor (prefer 0.5+).\n   - COMPOUNDING: Deploy amount is computed from wallet size — larger wallet = larger position. Use the amount provided in the cycle goal, do NOT default to a smaller fixed number.\n   - Focus on one high-conviction deployment per cycle.\n   - BIN STEP SCALING: Lower bin_step pools need MORE bins for the same % range. bin_step 20 needs 5x more bins than bin_step 100. Always calculate: bins = ceil(log(1 - pct) / log(1 + bin_step/10000)). Wide ranges (>69 bins) are handled automatically via multi-tx.\n---",
+      "started_at": "2026-03-28T11:26:05.473Z",
+      "started_at_position": 303,
+      "baseline": {
+        "win_rate": 57.1,
+        "avg_pnl_pct": 0.27,
+        "positions": 7
+      },
+      "trial": {
+        "win_rate": 57.1,
+        "avg_pnl_pct": -2.03,
+        "positions": 7
+      },
+      "status": "inconclusive"
+    },
+    {
+      "id": "exp_1774717127699",
+      "section": "screener_criteria",
+      "hypothesis": "Two of the four losses show OOR upside (PIXEL-SOL, Rosie-SOL), indicating the screener isn't detecting tokens in mid-pump phases. Adding pump detection to step 2's STUDY phase will help the agent either skip pump-phase tokens or recognize they need a two-sided strategy instead of bid_ask.",
+      "original_text": "1. SCREEN: Use get_top_candidates or discover_pools.\n2. STUDY: Call study_top_lpers. Look for high win rates and sustainable volume. Treat avg_range_pct as a starting point — adjust based on your LESSONS and MEMORY (especially OOR direction patterns from past sessions).\n3. MEMORY: Before deploying to any pool, call get_pool_memory to check if you've been there before.\n4. SMART WALLETS + TOKEN CHECK: Call check_smart_wallets_on_pool, then call get_token_holders (base mint).\n   - global_fees_sol = total priority/jito tips paid by ALL traders on this token (NOT Meteora LP fees — completely different).\n   - HARD SKIP if global_fees_sol < minTokenFeesSol (default 30 SOL). Low fees = bundled txs or scam. No exceptions.\n   - Smart wallets present + fees pass → strong signal, proceed to deploy.\n   - No smart wallets → also call get_token_narrative before deciding:\n     * SKIP if top_10_real_holders_pct > 60% OR bundlers > 30% OR narrative is empty/null/pure hype with no specific story\n     * CAUTION if bundlers 15–30% AND top_10 > 40% — check organic + buy/sell pressure\n     * Bundlers 5–15% are normal, not a skip signal on their own\n     * GOOD narrative: specific origin (real event, viral moment, named entity, active community actions)\n     * BAD narrative: generic hype (\"next 100x\", \"community token\") with no identifiable subject or story\n     * DEPLOY if global_fees_sol passes, distribution is healthy, and narrative has a real specific catalyst\n5. DEPLOY: get_active_bin then deploy_position.\n   - HARD RULE: Minimum 0.1 SOL absolute floor (prefer 0.5+).\n   - COMPOUNDING: Deploy amount is computed from wallet size — larger wallet = larger position. Use the amount provided in the cycle goal, do NOT default to a smaller fixed number.\n   - Focus on one high-conviction deployment per cycle.\n   - BIN STEP SCALING: Lower bin_step pools need MORE bins for the same % range. bin_step 20 needs 5x more bins than bin_step 100. Always calculate: bins = ceil(log(1 - pct) / log(1 + bin_step/10000)). Wide ranges (>69 bins) are handled automatically via multi-tx.",
+      "modified_text": "---\n1. SCREEN: Use get_top_candidates or discover_pools.\n2. STUDY: Call study_top_lpers. Look for high win rates and sustainable volume. Treat avg_range_pct as a starting point — adjust based on your LESSONS and MEMORY (especially OOR direction patterns from past sessions).\n   - PUMP DETECTION: If recent volume shows predominantly buy pressure (buy/sell ratio > 3:1) with rapid price appreciation, this token is MID-PUMP.\n     * MID-PUMP with bid_ask intent → HIGH RISK of OOR upside. Either SKIP or switch to spot with sol_split_pct ≥ 80%.\n     * Stable or mixed pressure → normal deployment acceptable.\n3. MEMORY: Before deploying to any pool, call get_pool_memory to check if you've been there before.\n4. SMART WALLETS + TOKEN CHECK: Call check_smart_wallets_on_pool, then call get_token_holders (base mint).\n   - global_fees_sol = total priority/jito tips paid by ALL traders on this token (NOT Meteora LP fees — completely different).\n   - HARD SKIP if global_fees_sol < minTokenFeesSol (default 30 SOL). Low fees = bundled txs or scam. No exceptions.\n   - Smart wallets present + fees pass → strong signal, proceed to deploy.\n   - No smart wallets → also call get_token_narrative before deciding:\n     * SKIP if top_10_real_holders_pct > 60% OR bundlers > 30% OR narrative is empty/null/pure hype with no specific story\n     * CAUTION if bundlers 15–30% AND top_10 > 40% — check organic + buy/sell pressure\n     * Bundlers 5–15% are normal, not a skip signal on their own\n     * GOOD narrative: specific origin (real event, viral moment, named entity, active community actions)\n     * BAD narrative: generic hype (\"next 100x\", \"community token\") with no identifiable subject or story\n     * DEPLOY if global_fees_sol passes, distribution is healthy, and narrative has a real specific catalyst\n5. DEPLOY: get_active_bin then deploy_position.\n   - HARD RULE: Minimum 0.1 SOL absolute floor (prefer 0.5+).\n   - COMPOUNDING: Deploy amount is computed from wallet size — larger wallet = larger position. Use the amount provided in the cycle goal, do NOT default to a smaller fixed number.\n   - Focus on one high-conviction deployment per cycle.\n   - BIN STEP SCALING: Lower bin_step pools need MORE bins for the same % range. bin_step 20 needs 5x more bins than bin_step 100. Always calculate: bins = ceil(log(1 - pct) / log(1 + bin_step/10000)). Wide ranges (>69 bins) are handled automatically via multi-tx.\n---",
+      "started_at": "2026-03-28T16:58:47.699Z",
+      "started_at_position": 316,
+      "baseline": {
+        "win_rate": 71.4,
+        "avg_pnl_pct": 1.22,
+        "positions": 7
+      },
+      "trial": {
+        "win_rate": 14.3,
+        "avg_pnl_pct": -31.07,
+        "positions": 7
+      },
+      "status": "reverted",
+      "weights_at_start": {
+        "organic_score": 2.071,
+        "fee_tvl_ratio": 2.356,
+        "volume": 0.3,
+        "mcap": 2.5,
+        "holder_count": 0.3,
+        "smart_wallets_present": 1,
+        "narrative_quality": 1,
+        "study_win_rate": 1.898,
+        "hive_consensus": 1,
+        "volatility": 0.949
+      }
+    },
+    {
+      "id": "exp_1774722830937",
+      "section": "range_selection",
+      "hypothesis": "The さえずり memecoin likely has extreme volatility exceeding even the >=8 band (50-70%), causing frequent OOR downside. Widening the extreme volatility row slightly may better accommodate memecoin-style pumps and dumps.",
+      "original_text": "- RANGE SIZING (volatility-driven — do NOT use study_top_lpers avg_range_pct for range):\n  Size your range from the pool's CURRENT conditions, not historical LPer behavior:\n\n  Pool Volatility  │ bid_ask range │ spot range  │ Reasoning\n  ─────────────────┼───────────────┼─────────────┼─────────────────────────────\n  >= 8  (extreme)  │ 50–70%        │ 60–80%      │ Wild swings, need room\n  5–8   (high)     │ 40–55%        │ 50–65%      │ Active memecoin territory\n  2–5   (moderate) │ 30–45%        │ 40–55%      │ Normal volatile pool\n  < 2   (low)      │ 25–35%        │ 30–40%      │ Ranging/stable, tighter = more fees\n\n  Adjust from the table using your MEMORY and LESSONS:\n  - If LESSONS show repeated OOR downside on similar pools → go wider within the band\n  - If LESSONS show positions staying in range → go tighter for better fee concentration\n  - study_top_lpers patterns (hold time, strategy, win rate) are useful context but their avg_range_pct reflects a DIFFERENT market regime — do not copy it\n\n- OOR DIRECTION MATTERS — widening range only helps if OOR matches the direction your liquidity extends:\n  * bid_ask (SOL below active bin): range extends DOWNWARD only. Wider range helps with DOWNSIDE OOR. Widening CANNOT fix upside OOR — price pumped above your liquidity and no amount of extra bins below will reach it.\n  * If you keep going OOR-upside on bid_ask, the problem is NOT range width — the token is pumping away from your position. Either wait for the pump to end, use a two-sided strategy with token exposure (sol_split_pct < 100), or skip the pool entirely.\n  * spot (SOL-only, bins below): same as bid_ask — wider only helps downside OOR.\n  * spot (two-sided): wider range helps BOTH directions since liquidity spans above and below.\n  * NEVER generate a lesson saying \"use wider range\" for upside OOR on a single-sided-below strategy. That analysis is fundamentally wrong.\n- COMPOUNDING: Deploy amount is ${deployAmount} SOL (scaled from wallet: ${currentBalanceSol} SOL). Do NOT override with a smaller amount.\n- After deploy: update_config setting=managementIntervalMin based on volatility (>=5→3, 2-5→5, <2→10).\n- Report: strategy chosen + why, price_range_pct used + volatility basis, deploy amount, interval set.",
+      "modified_text": "---\n- RANGE SIZING (volatility-driven — do NOT use study_top_lpers avg_range_pct for range):\n  Size your range from the pool's CURRENT conditions, not historical LPer behavior:\n\n  Pool Volatility  │ bid_ask range │ spot range  │ Reasoning\n  ─────────────────┼───────────────┼─────────────┼─────────────────────────────\n  >= 8  (extreme)  │ 55–75%        │ 65–85%      │ Wild swings, need room; memecoins often exceed model\n  5–8   (high)     │ 40–55%        │ 50–65%      │ Active memecoin territory\n  2–5   (moderate) │ 30–45%        │ 40–55%      │ Normal volatile pool\n  < 2   (low)      │ 25–35%        │ 30–40%      │ Ranging/stable, tighter = more fees\n\n  Adjust from the table using your MEMORY and LESSONS:\n  - If LESSONS show repeated OOR downside on similar pools → go wider within the band\n  - If LESSONS show positions staying in range → go tighter for better fee concentration\n  - study_top_lpers patterns (hold time, strategy, win rate) are useful context but their avg_range_pct reflects a DIFFERENT market regime — do not copy it\n\n- OOR DIRECTION MATTERS — widening range only helps if OOR matches the direction your liquidity extends:\n  * bid_ask (SOL below active bin): range extends DOWNWARD only. Wider range helps with DOWNSIDE OOR. Widening CANNOT fix upside OOR — price pumped above your liquidity and no amount of extra bins below will reach it.\n  * If you keep going OOR-upside on bid_ask, the problem is NOT range width — the token is pumping away from your position. Either wait for the pump to end, use a two-sided strategy with token exposure (sol_split_pct < 100), or skip the pool entirely.\n  * spot (SOL-only, bins below): same as bid_ask — wider only helps downside OOR.\n  * spot (two-sided): wider range helps BOTH directions since liquidity spans above and below.\n  * NEVER generate a lesson saying \"use wider range\" for upside OOR on a single-sided-below strategy. That analysis is fundamentally wrong.\n- COMPOUNDING: Deploy amount is ${deployAmount} SOL (scaled from wallet: ${currentBalanceSol} SOL). Do NOT override with a smaller amount.\n- After deploy: update_config setting=managementIntervalMin based on volatility (>=5→3, 2-5→5, <2→10).\n- Report: strategy chosen + why, price_range_pct used + volatility basis, deploy amount, interval set.\n---",
+      "started_at": "2026-03-28T18:33:50.937Z",
+      "started_at_position": 329,
+      "baseline": {
+        "win_rate": 14.3,
+        "avg_pnl_pct": -34.89,
+        "positions": 7
+      },
+      "trial": {
+        "win_rate": 57.1,
+        "avg_pnl_pct": 4.05,
+        "positions": 7
+      },
+      "status": "kept",
+      "weights_at_start": {
+        "organic_score": 1.824,
+        "fee_tvl_ratio": 2.042,
+        "volume": 0.3,
+        "mcap": 2.5,
+        "holder_count": 0.3,
+        "smart_wallets_present": 1,
+        "narrative_quality": 1,
+        "study_win_rate": 2.5,
+        "hive_consensus": 1,
+        "volatility": 0.962
+      }
+    },
+    {
+      "id": "exp_1774750160845",
+      "section": "screener_criteria",
+      "hypothesis": "The さえずり-SOL loss of -45.98% suggests poor token distribution quality. Tightening the CAUTION threshold from top_10 > 40% to > 35% will filter out tokens with more concentrated ownership that are prone to dumps.",
+      "original_text": "1. SCREEN: Use get_top_candidates or discover_pools.\n2. STUDY: Call study_top_lpers. Look for high win rates, sustainable volume, strategy choices (bid_ask vs spot), and hold times. Do NOT use avg_range_pct for your range — size from the volatility table in range selection rules instead.\n3. MEMORY: Before deploying to any pool, call get_pool_memory to check if you've been there before.\n4. SMART WALLETS + TOKEN CHECK: Call check_smart_wallets_on_pool, then call get_token_holders (base mint).\n   - global_fees_sol = total priority/jito tips paid by ALL traders on this token (NOT Meteora LP fees — completely different).\n   - HARD SKIP if global_fees_sol < minTokenFeesSol (default 30 SOL). Low fees = bundled txs or scam. No exceptions.\n   - Smart wallets present + fees pass → strong signal, proceed to deploy.\n   - No smart wallets → also call get_token_narrative before deciding:\n     * SKIP if top_10_real_holders_pct > 60% OR bundlers > 30% OR narrative is empty/null/pure hype with no specific story\n     * CAUTION if bundlers 15–30% AND top_10 > 40% — check organic + buy/sell pressure\n     * Bundlers 5–15% are normal, not a skip signal on their own\n     * GOOD narrative: specific origin (real event, viral moment, named entity, active community actions)\n     * BAD narrative: generic hype (\"next 100x\", \"community token\") with no identifiable subject or story\n     * DEPLOY if global_fees_sol passes, distribution is healthy, and narrative has a real specific catalyst\n5. DEPLOY: get_active_bin then deploy_position.\n   - HARD RULE: Minimum 0.1 SOL absolute floor (prefer 0.5+).\n   - COMPOUNDING: Deploy amount is computed from wallet size — larger wallet = larger position. Use the amount provided in the cycle goal, do NOT default to a smaller fixed number.\n   - Focus on one high-conviction deployment per cycle.\n   - BIN STEP SCALING: Lower bin_step pools need MORE bins for the same % range. bin_step 20 needs 5x more bins than bin_step 100. Always calculate: bins = ceil(log(1 - pct) / log(1 + bin_step/10000)). Wide ranges (>69 bins) are handled automatically via multi-tx.",
+      "modified_text": "---\n1. SCREEN: Use get_top_candidates or discover_pools.\n2. STUDY: Call study_top_lpers. Look for high win rates, sustainable volume, strategy choices (bid_ask vs spot), and hold times. Do NOT use avg_range_pct for your range — size from the volatility table in range selection rules instead.\n3. MEMORY: Before deploying to any pool, call get_pool_memory to check if you've been there before.\n4. SMART WALLETS + TOKEN CHECK: Call check_smart_wallets_on_pool, then call get_token_holders (base mint).\n   - global_fees_sol = total priority/jito tips paid by ALL traders on this token (NOT Meteora LP fees — completely different).\n   - HARD SKIP if global_fees_sol < minTokenFeesSol (default 30 SOL). Low fees = bundled txs or scam. No exceptions.\n   - Smart wallets present + fees pass → strong signal, proceed to deploy.\n   - No smart wallets → also call get_token_narrative before deciding:\n     * SKIP if top_10_real_holders_pct > 60% OR bundlers > 30% OR narrative is empty/null/pure hype with no specific story\n     * CAUTION if bundlers 15–30% AND top_10 > 35% — check organic + buy/sell pressure\n     * Bundlers 5–15% are normal, not a skip signal on their own\n     * GOOD narrative: specific origin (real event, viral moment, named entity, active community actions)\n     * BAD narrative: generic hype (\"next 100x\", \"community token\") with no identifiable subject or story\n     * DEPLOY if global_fees_sol passes, distribution is healthy, and narrative has a real specific catalyst\n5. DEPLOY: get_active_bin then deploy_position.\n   - HARD RULE: Minimum 0.1 SOL absolute floor (prefer 0.5+).\n   - COMPOUNDING: Deploy amount is computed from wallet size — larger wallet = larger position. Use the amount provided in the cycle goal, do NOT default to a smaller fixed number.\n   - Focus on one high-conviction deployment per cycle.\n   - BIN STEP SCALING: Lower bin_step pools need MORE bins for the same % range. bin_step 20 needs 5x more bins than bin_step 100. Always calculate: bins = ceil(log(1 - pct) / log(1 + bin_step/10000)). Wide ranges (>69 bins) are handled automatically via multi-tx.\n---",
+      "started_at": "2026-03-29T02:09:20.845Z",
+      "started_at_position": 343,
+      "baseline": {
+        "win_rate": 85.7,
+        "avg_pnl_pct": 3.24,
+        "positions": 7
+      },
+      "trial": {
+        "win_rate": 42.9,
+        "avg_pnl_pct": 0.2,
+        "positions": 7
+      },
+      "status": "reverted",
+      "weights_at_start": {
+        "organic_score": 1.621,
+        "fee_tvl_ratio": 1.786,
+        "volume": 0.3,
+        "mcap": 2.5,
+        "holder_count": 0.3,
+        "smart_wallets_present": 1,
+        "narrative_quality": 1,
+        "study_win_rate": 2.5,
+        "hive_consensus": 1,
+        "volatility": 0.976
+      }
+    },
+    {
+      "id": "exp_1774796811759",
+      "section": "range_selection",
+      "hypothesis": "All 3 recent failures are OOR upside on what appear to be memecoin-style pools (PUMPERPS, TRASHCAN, Gameify). The current rules allow deploying bid_ask on pumps without checking for recent price movement, so I should add a pre-deployment screening trigger that re-routes mid-pump tokens to spot strategies instead.",
+      "original_text": "---\n- RANGE SIZING (volatility-driven — do NOT use study_top_lpers avg_range_pct for range):\n  Size your range from the pool's CURRENT conditions, not historical LPer behavior:\n\n  Pool Volatility  │ bid_ask range │ spot range  │ Reasoning\n  ─────────────────┼───────────────┼─────────────┼─────────────────────────────\n  >= 8  (extreme)  │ 55–75%        │ 65–85%      │ Wild swings, need room; memecoins often exceed model\n  5–8   (high)     │ 40–55%        │ 50–65%      │ Active memecoin territory\n  2–5   (moderate) │ 30–45%        │ 40–55%      │ Normal volatile pool\n  < 2   (low)      │ 25–35%        │ 30–40%      │ Ranging/stable, tighter = more fees\n\n  Adjust from the table using your MEMORY and LESSONS:\n  - If LESSONS show repeated OOR downside on similar pools → go wider within the band\n  - If LESSONS show positions staying in range → go tighter for better fee concentration\n  - study_top_lpers patterns (hold time, strategy, win rate) are useful context but their avg_range_pct reflects a DIFFERENT market regime — do not copy it\n\n- OOR DIRECTION MATTERS — widening range only helps if OOR matches the direction your liquidity extends:\n  * bid_ask (SOL below active bin): range extends DOWNWARD only. Wider range helps with DOWNSIDE OOR. Widening CANNOT fix upside OOR — price pumped above your liquidity and no amount of extra bins below will reach it.\n  * If you keep going OOR-upside on bid_ask, the problem is NOT range width — the token is pumping away from your position. Either wait for the pump to end, use a two-sided strategy with token exposure (sol_split_pct < 100), or skip the pool entirely.\n  * spot (SOL-only, bins below): same as bid_ask — wider only helps downside OOR.\n  * spot (two-sided): wider range helps BOTH directions since liquidity spans above and below.\n  * NEVER generate a lesson saying \"use wider range\" for upside OOR on a single-sided-below strategy. That analysis is fundamentally wrong.\n- COMPOUNDING: Deploy amount is ${deployAmount} SOL (scaled from wallet: ${currentBalanceSol} SOL). Do NOT override with a smaller amount.\n- After deploy: update_config setting=managementIntervalMin based on volatility (>=5→3, 2-5→5, <2→10).\n- Report: strategy chosen + why, price_range_pct used + volatility basis, deploy amount, interval set.\n---",
+      "modified_text": "---\n- RANGE SIZING (volatility-driven — do NOT use study_top_lpers avg_range_pct for range):\n  Size your range from the pool's CURRENT conditions, not historical LPer behavior:\n\n  Pool Volatility  │ bid_ask range │ spot range  │ Reasoning\n  ─────────────────┼───────────────┼─────────────┼─────────────────────────────\n  >= 8  (extreme)  │ 55–75%        │ 65–85%      │ Wild swings, need room; memecoins often exceed model\n  5–8   (high)     │ 40–55%        │ 50–65%      │ Active memecoin territory\n  2–5   (moderate) │ 30–45%        │ 40–55%      │ Normal volatile pool\n  < 2   (low)      │ 25–35%        │ 30–40%      │ Ranging/stable, tighter = more fees\n\n  Adjust from the table using your MEMORY and LESSONS:\n  - If LESSONS show repeated OOR downside on similar pools → go wider within the band\n  - If LESSONS show positions staying in range → go tighter for better fee concentration\n  - study_top_lpers patterns (hold time, strategy, win rate) are useful context but their avg_range_pct reflects a DIFFERENT market regime — do not copy it\n\n  **PUMP SCREENING for bid_ask:** If the token shows a strong recent pump (e.g., high organic_score decline, volume spike without matching TVL growth, or Memecoin flags), do NOT deploy bid_ask. Route to spot with sol_split_pct 80-90 instead. Bid_ask is fundamentally unsuitable when price is actively moving upward — it earns nothing until the pump ends.\n\n- OOR DIRECTION MATTERS — widening range only helps if OOR matches the direction your liquidity extends:\n  * bid_ask (SOL below active bin): range extends DOWNWARD only. Wider range helps with DOWNSIDE OOR. Widening CANNOT fix upside OOR — price pumped above your liquidity and no amount of extra bins below will reach it.\n  * If you keep going OOR-upside on bid_ask, the problem is NOT range width — the token is pumping away from your position. Either wait for the pump to end, use a two-sided strategy with token exposure (sol_split_pct < 100), or skip the pool entirely.\n  * spot (SOL-only, bins below): same as bid_ask — wider only helps downside OOR.\n  * spot (two-sided): wider range helps BOTH directions since liquidity spans above and below.\n  * NEVER generate a lesson saying \"use wider range\" for upside OOR on a single-sided-below strategy. That analysis is fundamentally wrong.\n- COMPOUNDING: Deploy amount is ${deployAmount} SOL (scaled from wallet: ${currentBalanceSol} SOL). Do NOT override with a smaller amount.\n- After deploy: update_config setting=managementIntervalMin based on volatility (>=5→3, 2-5→5, <2→10).\n- Report: strategy chosen + why, price_range_pct used + volatility basis, deploy amount, interval set.\n---",
+      "started_at": "2026-03-29T15:06:51.759Z",
+      "started_at_position": 358,
+      "baseline": {
+        "win_rate": 42.9,
+        "avg_pnl_pct": 2.07,
+        "positions": 7
+      },
+      "trial": {
+        "win_rate": 85.7,
+        "avg_pnl_pct": 1.19,
+        "positions": 7
+      },
+      "status": "kept",
+      "weights_at_start": {
+        "organic_score": 0.822,
+        "fee_tvl_ratio": 1.43,
+        "volume": 0.3,
+        "mcap": 2.441,
+        "holder_count": 0.483,
+        "smart_wallets_present": 1,
+        "narrative_quality": 1,
+        "study_win_rate": 2.5,
+        "hive_consensus": 1,
+        "volatility": 1.074,
+        "ath_proximity": 1
+      }
+    },
+    {
+      "id": "exp_1774808185510",
+      "section": "screener_criteria",
+      "hypothesis": "The failures show OOR upside on TARO-SOL, indicating the screener lacks a check for tokens that are mid-pump. Adding a momentum warning to the narrative/deployment decision will help avoid deploying into tokens with limited upside room.",
+      "original_text": "1. SCREEN: Use get_top_candidates or discover_pools.\n2. STUDY: Call study_top_lpers. Look for high win rates, sustainable volume, strategy choices (bid_ask vs spot), and hold times. Do NOT use avg_range_pct for your range — size from the volatility table in range selection rules instead.\n3. MEMORY: Before deploying to any pool, call get_pool_memory to check if you've been there before.\n4. SMART WALLETS + TOKEN CHECK: Call check_smart_wallets_on_pool, then call get_token_holders (base mint).\n   - global_fees_sol = total priority/jito tips paid by ALL traders on this token (NOT Meteora LP fees — completely different).\n   - HARD SKIP if global_fees_sol < minTokenFeesSol (default 30 SOL). Low fees = bundled txs or scam. No exceptions.\n   - Smart wallets present + fees pass → strong signal, proceed to deploy.\n   - No smart wallets → also call get_token_narrative before deciding:\n     * SKIP if top_10_real_holders_pct > 60% OR bundlers > 30% OR narrative is empty/null/pure hype with no specific story\n     * CAUTION if bundlers 15–30% AND top_10 > 40% — check organic + buy/sell pressure\n     * Bundlers 5–15% are normal, not a skip signal on their own\n     * GOOD narrative: specific origin (real event, viral moment, named entity, active community actions)\n     * BAD narrative: generic hype (\"next 100x\", \"community token\") with no identifiable subject or story\n     * DEPLOY if global_fees_sol passes, distribution is healthy, and narrative has a real specific catalyst\n5. DEPLOY: get_active_bin then deploy_position.\n   - HARD RULE: Minimum 0.1 SOL absolute floor (prefer 0.5+).\n   - COMPOUNDING: Deploy amount is computed from wallet size — larger wallet = larger position. Use the amount provided in the cycle goal, do NOT default to a smaller fixed number.\n   - Focus on one high-conviction deployment per cycle.\n   - BIN STEP SCALING: Lower bin_step pools need MORE bins for the same % range. bin_step 20 needs 5x more bins than bin_step 100. Always calculate: bins = ceil(log(1 - pct) / log(1 + bin_step/10000)). Wide ranges (>69 bins) are handled automatically via multi-tx.",
+      "modified_text": "---\n1. SCREEN: Use get_top_candidates or discover_pools.\n2. STUDY: Call study_top_lpers. Look for high win rates, sustainable volume, strategy choices (bid_ask vs spot), and hold times. Do NOT use avg_range_pct for your range — size from the volatility table in range selection rules instead.\n3. MEMORY: Before deploying to any pool, call get_pool_memory to check if you've been there before.\n4. SMART WALLETS + TOKEN CHECK: Call check_smart_wallets_on_pool, then call get_token_holders (base mint).\n   - global_fees_sol = total priority/jito tips paid by ALL traders on this token (NOT Meteora LP fees — completely different).\n   - HARD SKIP if global_fees_sol < minTokenFeesSol (default 30 SOL). Low fees = bundled txs or scam. No exceptions.\n   - Smart wallets present + fees pass → strong signal, proceed to deploy.\n   - No smart wallets → also call get_token_narrative before deciding:\n     * SKIP if top_10_real_holders_pct > 60% OR bundlers > 30% OR narrative is empty/null/pure hype with no specific story\n     * CAUTION if bundlers 15–30% AND top_10 > 40% — check organic + buy/sell pressure\n     * CAUTION if narrative shows token is mid-pump or recently viral with large recent price move (limited upside, high OOR upside risk) — consider skipping or tightening entry\n     * Bundlers 5–15% are normal, not a skip signal on their own\n     * GOOD narrative: specific origin (real event, viral moment, named entity, active community actions) — AND token is not mid-pump\n     * BAD narrative: generic hype (\"next 100x\", \"community token\") with no identifiable subject or story, OR is mid-pump with no pullback\n     * DEPLOY if global_fees_sol passes, distribution is healthy, narrative has a real specific catalyst, AND token is not mid-pump\n5. DEPLOY: get_active_bin then deploy_position.\n   - HARD RULE: Minimum 0.1 SOL absolute floor (prefer 0.5+).\n   - COMPOUNDING: Deploy amount is computed from wallet size — larger wallet = larger position. Use the amount provided in the cycle goal, do NOT default to a smaller fixed number.\n   - Focus on one high-conviction deployment per cycle.\n   - BIN STEP SCALING: Lower bin_step pools need MORE bins for the same % range. bin_step 20 needs 5x more bins than bin_step 100. Always calculate: bins = ceil(log(1 - pct) / log(1 + bin_step/10000)). Wide ranges (>69 bins) are handled automatically via multi-tx.\n---",
+      "started_at": "2026-03-29T18:16:25.510Z",
+      "started_at_position": 371,
+      "baseline": {
+        "win_rate": 57.1,
+        "avg_pnl_pct": 7.35,
+        "positions": 7
+      },
+      "trial": {
+        "win_rate": 71.4,
+        "avg_pnl_pct": 4.3,
+        "positions": 7
+      },
+      "status": "inconclusive",
+      "weights_at_start": {
+        "organic_score": 1.085,
+        "fee_tvl_ratio": 1.456,
+        "volume": 0.3,
+        "mcap": 1.43,
+        "holder_count": 0.573,
+        "smart_wallets_present": 1,
+        "narrative_quality": 1,
+        "study_win_rate": 2.5,
+        "hive_consensus": 1,
+        "volatility": 1.192,
+        "ath_proximity": 1
+      }
+    },
+    {
+      "id": "exp_1774825270128",
+      "section": "screener_criteria",
+      "hypothesis": "The repeated \"OOR upside\" failures indicate the agent is deploying bid_ask strategy to tokens mid-pump. Adding guidance to switch to spot+high sol_split_pct when smart wallets are absent but fees/distribution pass will capture upward moves instead of going idle.",
+      "original_text": "1. SCREEN: Use get_top_candidates or discover_pools.\n2. STUDY: Call study_top_lpers. Look for high win rates, sustainable volume, strategy choices (bid_ask vs spot), and hold times. Do NOT use avg_range_pct for your range — size from the volatility table in range selection rules instead.\n3. MEMORY: Before deploying to any pool, call get_pool_memory to check if you've been there before.\n4. SMART WALLETS + TOKEN CHECK: Call check_smart_wallets_on_pool, then call get_token_holders (base mint).\n   - global_fees_sol = total priority/jito tips paid by ALL traders on this token (NOT Meteora LP fees — completely different).\n   - HARD SKIP if global_fees_sol < minTokenFeesSol (default 30 SOL). Low fees = bundled txs or scam. No exceptions.\n   - Smart wallets present + fees pass → strong signal, proceed to deploy.\n   - No smart wallets → also call get_token_narrative before deciding:\n     * SKIP if top_10_real_holders_pct > 60% OR bundlers > 30% OR narrative is empty/null/pure hype with no specific story\n     * CAUTION if bundlers 15–30% AND top_10 > 40% — check organic + buy/sell pressure\n     * Bundlers 5–15% are normal, not a skip signal on their own\n     * GOOD narrative: specific origin (real event, viral moment, named entity, active community actions)\n     * BAD narrative: generic hype (\"next 100x\", \"community token\") with no identifiable subject or story\n     * DEPLOY if global_fees_sol passes, distribution is healthy, and narrative has a real specific catalyst\n5. DEPLOY: get_active_bin then deploy_position.\n   - HARD RULE: Minimum 0.1 SOL absolute floor (prefer 0.5+).\n   - COMPOUNDING: Deploy amount is computed from wallet size — larger wallet = larger position. Use the amount provided in the cycle goal, do NOT default to a smaller fixed number.\n   - Focus on one high-conviction deployment per cycle.\n   - BIN STEP SCALING: Lower bin_step pools need MORE bins for the same % range. bin_step 20 needs 5x more bins than bin_step 100. Always calculate: bins = ceil(log(1 - pct) / log(1 + bin_step/10000)). Wide ranges (>69 bins) are handled automatically via multi-tx.",
+      "modified_text": "---\n1. SCREEN: Use get_top_candidates or discover_pools.\n2. STUDY: Call study_top_lpers. Look for high win rates, sustainable volume, strategy choices (bid_ask vs spot), and hold times. Do NOT use avg_range_pct for your range — size from the volatility table in range selection rules instead.\n3. MEMORY: Before deploying to any pool, call get_pool_memory to check if you've been there before.\n4. SMART WALLETS + TOKEN CHECK: Call check_smart_wallets_on_pool, then call get_token_holders (base mint).\n   - global_fees_sol = total priority/jito tips paid by ALL traders on this token (NOT Meteora LP fees — completely different).\n   - HARD SKIP if global_fees_sol < minTokenFeesSol (default 30 SOL). Low fees = bundled txs or scam. No exceptions.\n   - Smart wallets present + fees pass → strong signal, proceed to deploy.\n   - No smart wallets → also call get_token_narrative before deciding:\n     * SKIP if top_10_real_holders_pct > 60% OR bundlers > 30% OR narrative is empty/null/pure hype with no specific story\n     * CAUTION if bundlers 15–30% AND top_10 > 40% — check organic + buy/sell pressure\n     * Bundlers 5–15% are normal, not a skip signal on their own\n     * GOOD narrative: specific origin (real event, viral moment, named entity, active community actions)\n     * BAD narrative: generic hype (\"next 100x\", \"community token\") with no identifiable subject or story\n     * DEPLOY if global_fees_sol passes, distribution is healthy, and narrative has a real specific catalyst\n     * NO SMART WALLETS BUT FEES/DISTRIBUTION PASS → Use spot strategy with sol_split_pct ≥ 80. This captures upward moves instead of going idle above range.\n5. DEPLOY: get_active_bin then deploy_position.\n   - HARD RULE: Minimum 0.1 SOL absolute floor (prefer 0.5+).\n   - COMPOUNDING: Deploy amount is computed from wallet size — larger wallet = larger position. Use the amount provided in the cycle goal, do NOT default to a smaller fixed number.\n   - Focus on one high-conviction deployment per cycle.\n   - BIN STEP SCALING: Lower bin_step pools need MORE bins for the same % range. bin_step 20 needs 5x more bins than bin_step 100. Always calculate: bins = ceil(log(1 - pct) / log(1 + bin_step/10000)). Wide ranges (>69 bins) are handled automatically via multi-tx.\n---",
+      "started_at": "2026-03-29T23:01:10.128Z",
+      "started_at_position": 385,
+      "baseline": {
+        "win_rate": 57.1,
+        "avg_pnl_pct": 1.38,
+        "positions": 7
+      },
+      "trial": {
+        "win_rate": 71.4,
+        "avg_pnl_pct": -1.86,
+        "positions": 7
+      },
+      "status": "reverted",
+      "weights_at_start": {
+        "organic_score": 1.957,
+        "fee_tvl_ratio": 1.344,
+        "volume": 0.3,
+        "mcap": 1.324,
+        "holder_count": 0.393,
+        "smart_wallets_present": 1,
+        "narrative_quality": 1,
+        "study_win_rate": 2.5,
+        "hive_consensus": 1,
+        "volatility": 1.145,
+        "ath_proximity": 1
+      }
+    },
+    {
+      "id": "exp_1774839776216",
+      "section": "screener_criteria",
+      "hypothesis": "Tokens with active smart wallets are more likely to be mid-pump, making bid_ask strategies prone to OOR upside. Changing the instruction to default to spot with high sol_split_pct (85%) when smart wallets are present will capture fees bidirectionally and avoid idle SOL when price pumps.",
+      "original_text": "1. SCREEN: Use get_top_candidates or discover_pools.\n2. STUDY: Call study_top_lpers. Look for high win rates, sustainable volume, strategy choices (bid_ask vs spot), and hold times. Do NOT use avg_range_pct for your range — size from the volatility table in range selection rules instead.\n3. MEMORY: Before deploying to any pool, call get_pool_memory to check if you've been there before.\n4. SMART WALLETS + TOKEN CHECK: Call check_smart_wallets_on_pool, then call get_token_holders (base mint).\n   - global_fees_sol = total priority/jito tips paid by ALL traders on this token (NOT Meteora LP fees — completely different).\n   - HARD SKIP if global_fees_sol < minTokenFeesSol (default 30 SOL). Low fees = bundled txs or scam. No exceptions.\n   - Smart wallets present + fees pass → strong signal, proceed to deploy.\n   - No smart wallets → also call get_token_narrative before deciding:\n     * SKIP if top_10_real_holders_pct > 60% OR bundlers > 30% OR narrative is empty/null/pure hype with no specific story\n     * CAUTION if bundlers 15–30% AND top_10 > 40% — check organic + buy/sell pressure\n     * Bundlers 5–15% are normal, not a skip signal on their own\n     * GOOD narrative: specific origin (real event, viral moment, named entity, active community actions)\n     * BAD narrative: generic hype (\"next 100x\", \"community token\") with no identifiable subject or story\n     * DEPLOY if global_fees_sol passes, distribution is healthy, and narrative has a real specific catalyst\n5. DEPLOY: get_active_bin then deploy_position.\n   - HARD RULE: Minimum 0.1 SOL absolute floor (prefer 0.5+).\n   - COMPOUNDING: Deploy amount is computed from wallet size — larger wallet = larger position. Use the amount provided in the cycle goal, do NOT default to a smaller fixed number.\n   - Focus on one high-conviction deployment per cycle.\n   - BIN STEP SCALING: Lower bin_step pools need MORE bins for the same % range. bin_step 20 needs 5x more bins than bin_step 100. Always calculate: bins = ceil(log(1 - pct) / log(1 + bin_step/10000)). Wide ranges (>69 bins) are handled automatically via multi-tx.",
+      "modified_text": "---\n1. SCREEN: Use get_top_candidates or discover_pools.\n2. STUDY: Call study_top_lpers. Look for high win rates, sustainable volume, strategy choices (bid_ask vs spot), and hold times. Do NOT use avg_range_pct for your range — size from the volatility table in range selection rules instead.\n3. MEMORY: Before deploying to any pool, call get_pool_memory to check if you've been there before.\n4. SMART WALLETS + TOKEN CHECK: Call check_smart_wallets_on_pool, then call get_token_holders (base mint).\n   - global_fees_sol = total priority/jito tips paid by ALL traders on this token (NOT Meteora LP fees — completely different).\n   - HARD SKIP if global_fees_sol < minTokenFeesSol (default 30 SOL). Low fees = bundled txs or scam. No exceptions.\n   - Smart wallets present + fees pass → strong signal, proceed to deploy BUT use spot strategy with sol_split_pct 85 (captures fees bidirectionally, avoids OOR upside if token pumps).\n   - No smart wallets → also call get_token_narrative before deciding:\n     * SKIP if top_10_real_holders_pct > 60% OR bundlers > 30% OR narrative is empty/null/pure hype with no specific story\n     * CAUTION if bundlers 15–30% AND top_10 > 40% — check organic + buy/sell pressure\n     * Bundlers 5–15% are normal, not a skip signal on their own\n     * GOOD narrative: specific origin (real event, viral moment, named entity, active community actions)\n     * BAD narrative: generic hype (\"next 100x\", \"community token\") with no identifiable subject or story\n     * DEPLOY if global_fees_sol passes, distribution is healthy, and narrative has a real specific catalyst\n5. DEPLOY: get_active_bin then deploy_position.\n   - HARD RULE: Minimum 0.1 SOL absolute floor (prefer 0.5+).\n   - COMPOUNDING: Deploy amount is computed from wallet size — larger wallet = larger position. Use the amount provided in the cycle goal, do NOT default to a smaller fixed number.\n   - Focus on one high-conviction deployment per cycle.\n   - BIN STEP SCALING: Lower bin_step pools need MORE bins for the same % range. bin_step 20 needs 5x more bins than bin_step 100. Always calculate: bins = ceil(log(1 - pct) / log(1 + bin_step/10000)). Wide ranges (>69 bins) are handled automatically via multi-tx.\n---",
+      "started_at": "2026-03-30T03:02:56.216Z",
+      "started_at_position": 399,
+      "baseline": {
+        "win_rate": 100,
+        "avg_pnl_pct": 6.31,
+        "positions": 7
+      },
+      "trial": {
+        "win_rate": 71.4,
+        "avg_pnl_pct": -1.51,
+        "positions": 7
+      },
+      "status": "reverted",
+      "weights_at_start": {
+        "organic_score": 2.5,
+        "fee_tvl_ratio": 1.299,
+        "volume": 0.3,
+        "mcap": 1.16,
+        "holder_count": 0.388,
+        "smart_wallets_present": 1,
+        "narrative_quality": 1,
+        "study_win_rate": 2.5,
+        "hive_consensus": 1,
+        "volatility": 1.124,
+        "ath_proximity": 1
+      }
+    },
+    {
+      "id": "exp_1774870918596",
+      "section": "screener_criteria",
+      "hypothesis": "Three of four failures show \"OOR upside\" — the agent is deploying bid_ask strategy into tokens that are already mid-pump. Adding a momentum filter to the screener will prevent entries during upward surges, where bid_ask (SOL below price) cannot capture upside and gets stranded when price continues pumping above range.",
+      "original_text": "1. SCREEN: Use get_top_candidates or discover_pools.\n2. STUDY: Call study_top_lpers. Look for high win rates, sustainable volume, strategy choices (bid_ask vs spot), and hold times. Do NOT use avg_range_pct for your range — size from the volatility table in range selection rules instead.\n3. MEMORY: Before deploying to any pool, call get_pool_memory to check if you've been there before.\n4. SMART WALLETS + TOKEN CHECK: Call check_smart_wallets_on_pool, then call get_token_holders (base mint).\n   - global_fees_sol = total priority/jito tips paid by ALL traders on this token (NOT Meteora LP fees — completely different).\n   - HARD SKIP if global_fees_sol < minTokenFeesSol (default 30 SOL). Low fees = bundled txs or scam. No exceptions.\n   - Smart wallets present + fees pass → strong signal, proceed to deploy.\n   - No smart wallets → also call get_token_narrative before deciding:\n     * SKIP if top_10_real_holders_pct > 60% OR bundlers > 30% OR narrative is empty/null/pure hype with no specific story\n     * CAUTION if bundlers 15–30% AND top_10 > 40% — check organic + buy/sell pressure\n     * Bundlers 5–15% are normal, not a skip signal on their own\n     * GOOD narrative: specific origin (real event, viral moment, named entity, active community actions)\n     * BAD narrative: generic hype (\"next 100x\", \"community token\") with no identifiable subject or story\n     * DEPLOY if global_fees_sol passes, distribution is healthy, and narrative has a real specific catalyst\n5. DEPLOY: get_active_bin then deploy_position.\n   - HARD RULE: Minimum 0.1 SOL absolute floor (prefer 0.5+).\n   - COMPOUNDING: Deploy amount is computed from wallet size — larger wallet = larger position. Use the amount provided in the cycle goal, do NOT default to a smaller fixed number.\n   - Focus on one high-conviction deployment per cycle.\n   - BIN STEP SCALING: Lower bin_step pools need MORE bins for the same % range. bin_step 20 needs 5x more bins than bin_step 100. Always calculate: bins = ceil(log(1 - pct) / log(1 + bin_step/10000)). Wide ranges (>69 bins) are handled automatically via multi-tx.",
+      "modified_text": "---\n1. SCREEN: Use get_top_candidates or discover_pools.\n2. STUDY: Call study_top_lpers. Look for high win rates, sustainable volume, strategy choices (bid_ask vs spot), and hold times. Do NOT use avg_range_pct for your range — size from the volatility table in range selection rules instead.\n3. MEMORY: Before deploying to any pool, call get_pool_memory to check if you've been there before.\n4. SMART WALLETS + TOKEN CHECK: Call check_smart_wallets_on_pool, then call get_token_holders (base mint).\n   - global_fees_sol = total priority/jito tips paid by ALL traders on this token (NOT Meteora LP fees — completely different).\n   - HARD SKIP if global_fees_sol < minTokenFeesSol (default 30 SOL). Low fees = bundled txs or scam. No exceptions.\n   - Smart wallets present + fees pass → strong signal, proceed to deploy.\n   - No smart wallets → also call get_token_narrative before deciding:\n     * SKIP if top_10_real_holders_pct > 60% OR bundlers > 30% OR narrative is empty/null/pure hype with no specific story\n     * CAUTION if bundlers 15–30% AND top_10 > 40% — check organic + buy/sell pressure\n     * Bundlers 5–15% are normal, not a skip signal on their own\n     * GOOD narrative: specific origin (real event, viral moment, named entity, active community actions)\n     * BAD narrative: generic hype (\"next 100x\", \"community token\") with no identifiable subject or story\n     * DEPLOY if global_fees_sol passes, distribution is healthy, and narrative has a real specific catalyst\n5. MOMENTUM FILTER (NEW): Before any deployment, check for mid-pump risk:\n   - Call get_token_market_data to assess recent price movement and volume trends.\n   - SKIP or switch to spot strategy if: 24h price change > 50%, OR 24h volume > 2x 7-day average, OR buy_pressure_score > 0.6.\n   - Rationale: bid_ask places SOL below current price — if price is already surging upward, the position will go OOR upside and earn nothing. Spot strategy can capture fees on the way up and avoid this failure mode.\n6. DEPLOY: get_active_bin then deploy_position.\n   - HARD RULE: Minimum 0.1 SOL absolute floor (prefer 0.5+).\n   - COMPOUNDING: Deploy amount is computed from wallet size — larger wallet = larger position. Use the amount provided in the cycle goal, do NOT default to a smaller fixed number.\n   - Focus on one high-conviction deployment per cycle.\n   - BIN STEP SCALING: Lower bin_step pools need MORE bins for the same % range. bin_step 20 needs 5x more bins than bin_step 100. Always calculate: bins = ceil(log(1 - pct) / log(1 + bin_step/10000)). Wide ranges (>69 bins) are handled automatically via multi-tx.\n---",
+      "started_at": "2026-03-30T11:41:58.596Z",
+      "started_at_position": 413,
+      "baseline": {
+        "win_rate": 71.4,
+        "avg_pnl_pct": 3.16,
+        "positions": 7
+      },
+      "trial": {
+        "win_rate": 71.4,
+        "avg_pnl_pct": 2.39,
+        "positions": 7
+      },
+      "status": "inconclusive",
+      "weights_at_start": {
+        "organic_score": 2.5,
+        "fee_tvl_ratio": 1.249,
+        "volume": 0.341,
+        "mcap": 0.783,
+        "holder_count": 0.49,
+        "smart_wallets_present": 1,
+        "narrative_quality": 1,
+        "study_win_rate": 2.5,
+        "hive_consensus": 1,
+        "volatility": 0.909,
+        "ath_proximity": 1
+      }
+    },
+    {
+      "id": "exp_1774876573714",
+      "section": "screener_criteria",
+      "hypothesis": "The 100x-SOL OOR upside loss (-22.49%) suggests the agent is deploying into mid-pump tokens where the bid_ask strategy can't capture upside. Adding \"avoid mid-pump\" guidance within the narrative check will prevent deploying into tokens that have already rallied, while narrative checks already address the external close risk by filtering out hyped tokens with no real catalyst.",
+      "original_text": "1. SCREEN: Use get_top_candidates or discover_pools.\n2. STUDY: Call study_top_lpers. Look for high win rates, sustainable volume, strategy choices (bid_ask vs spot), and hold times. Do NOT use avg_range_pct for your range — size from the volatility table in range selection rules instead.\n3. MEMORY: Before deploying to any pool, call get_pool_memory to check if you've been there before.\n4. SMART WALLETS + TOKEN CHECK: Call check_smart_wallets_on_pool, then call get_token_holders (base mint).\n   - global_fees_sol = total priority/jito tips paid by ALL traders on this token (NOT Meteora LP fees — completely different).\n   - HARD SKIP if global_fees_sol < minTokenFeesSol (default 30 SOL). Low fees = bundled txs or scam. No exceptions.\n   - Smart wallets present + fees pass → strong signal, proceed to deploy.\n   - No smart wallets → also call get_token_narrative before deciding:\n     * SKIP if top_10_real_holders_pct > 60% OR bundlers > 30% OR narrative is empty/null/pure hype with no specific story\n     * CAUTION if bundlers 15–30% AND top_10 > 40% — check organic + buy/sell pressure\n     * Bundlers 5–15% are normal, not a skip signal on their own\n     * GOOD narrative: specific origin (real event, viral moment, named entity, active community actions)\n     * BAD narrative: generic hype (\"next 100x\", \"community token\") with no identifiable subject or story\n     * DEPLOY if global_fees_sol passes, distribution is healthy, and narrative has a real specific catalyst\n5. DEPLOY: get_active_bin then deploy_position.\n   - HARD RULE: Minimum 0.1 SOL absolute floor (prefer 0.5+).\n   - COMPOUNDING: Deploy amount is computed from wallet size — larger wallet = larger position. Use the amount provided in the cycle goal, do NOT default to a smaller fixed number.\n   - Focus on one high-conviction deployment per cycle.\n   - BIN STEP SCALING: Lower bin_step pools need MORE bins for the same % range. bin_step 20 needs 5x more bins than bin_step 100. Always calculate: bins = ceil(log(1 - pct) / log(1 + bin_step/10000)). Wide ranges (>69 bins) are handled automatically via multi-tx.",
+      "modified_text": "---\n1. SCREEN: Use get_top_candidates or discover_pools.\n2. STUDY: Call study_top_lpers. Look for high win rates, sustainable volume, strategy choices (bid_ask vs spot), and hold times. Do NOT use avg_range_pct for your range — size from the volatility table in range selection rules instead.\n3. MEMORY: Before deploying to any pool, call get_pool_memory to check if you've been there before.\n4. SMART WALLETS + TOKEN CHECK: Call check_smart_wallets_on_pool, then call get_token_narrative before deciding:\n   - global_fees_sol = total priority/jito tips paid by ALL traders on this token (NOT Meteora LP fees — completely different).\n   - HARD SKIP if global_fees_sol < minTokenFeesSol (default 30 SOL). Low fees = bundled txs or scam. No exceptions.\n   - Smart wallets present + fees pass → strong signal, proceed to deploy.\n   - No smart wallets → also call get_token_narrative before deciding:\n     * SKIP if top_10_real_holders_pct > 60% OR bundlers > 30% OR narrative is empty/null/pure hype with no specific story\n     * CAUTION if bundlers 15–30% AND top_10 > 40% — check organic + buy/sell pressure\n     * Bundlers 5–15% are normal, not a skip signal on their own\n     * GOOD narrative: specific origin (real event, viral moment, named entity, active community actions) AND token has NOT already pumped significantly (check recent price chart — if rally already occurred, skip even if narrative exists, as upside is already captured by earlier buyers)\n     * BAD narrative: generic hype (\"next 100x\", \"community token\") with no identifiable subject or story\n     * DEPLOY if global_fees_sol passes, distribution is healthy, narrative has a real specific catalyst, AND token has not already rallied\n5. DEPLOY: get_active_bin then deploy_position.\n   - HARD RULE: Minimum 0.1 SOL absolute floor (prefer 0.5+).\n   - COMPOUNDING: Deploy amount is computed from wallet size — larger wallet = larger position. Use the amount provided in the cycle goal, do NOT default to a smaller fixed number.\n   - Focus on one high-conviction deployment per cycle.\n   - BIN STEP SCALING: Lower bin_step pools need MORE bins for the same % range. bin_step 20 needs 5x more bins than bin_step 100. Always calculate: bins = ceil(log(1 - pct) / log(1 + bin_step/10000)). Wide ranges (>69 bins) are handled automatically via multi-tx.\n---",
+      "started_at": "2026-03-30T13:16:13.714Z",
+      "started_at_position": 426,
+      "baseline": {
+        "win_rate": 28.6,
+        "avg_pnl_pct": 0.97,
+        "positions": 7
+      },
+      "trial": {
+        "win_rate": 71.4,
+        "avg_pnl_pct": 6.54,
+        "positions": 7
+      },
+      "status": "kept",
+      "weights_at_start": {
+        "organic_score": 2.5,
+        "fee_tvl_ratio": 1.2,
+        "volume": 0.313,
+        "mcap": 0.514,
+        "holder_count": 0.591,
+        "smart_wallets_present": 1,
+        "narrative_quality": 1,
+        "study_win_rate": 2.5,
+        "hive_consensus": 1,
+        "volatility": 0.929,
+        "ath_proximity": 1
+      }
+    },
+    {
+      "id": "exp_1774885107526",
+      "section": "screener_criteria",
+      "hypothesis": "Adding a minimum pool age check would filter out newly-created pools that are more susceptible to rugs or external manipulation, addressing both \"external close\" (possible pool drain/rug) and \"agent decision\" (agent detected risk) failure modes.",
+      "original_text": "---\n1. SCREEN: Use get_top_candidates or discover_pools.\n2. STUDY: Call study_top_lpers. Look for high win rates, sustainable volume, strategy choices (bid_ask vs spot), and hold times. Do NOT use avg_range_pct for your range — size from the volatility table in range selection rules instead.\n3. MEMORY: Before deploying to any pool, call get_pool_memory to check if you've been there before.\n4. SMART WALLETS + TOKEN CHECK: Call check_smart_wallets_on_pool, then call get_token_narrative before deciding:\n   - global_fees_sol = total priority/jito tips paid by ALL traders on this token (NOT Meteora LP fees — completely different).\n   - HARD SKIP if global_fees_sol < minTokenFeesSol (default 30 SOL). Low fees = bundled txs or scam. No exceptions.\n   - Smart wallets present + fees pass → strong signal, proceed to deploy.\n   - No smart wallets → also call get_token_narrative before deciding:\n     * SKIP if top_10_real_holders_pct > 60% OR bundlers > 30% OR narrative is empty/null/pure hype with no specific story\n     * CAUTION if bundlers 15–30% AND top_10 > 40% — check organic + buy/sell pressure\n     * Bundlers 5–15% are normal, not a skip signal on their own\n     * GOOD narrative: specific origin (real event, viral moment, named entity, active community actions) AND token has NOT already pumped significantly (check recent price chart — if rally already occurred, skip even if narrative exists, as upside is already captured by earlier buyers)\n     * BAD narrative: generic hype (\"next 100x\", \"community token\") with no identifiable subject or story\n     * DEPLOY if global_fees_sol passes, distribution is healthy, narrative has a real specific catalyst, AND token has not already rallied\n5. DEPLOY: get_active_bin then deploy_position.\n   - HARD RULE: Minimum 0.1 SOL absolute floor (prefer 0.5+).\n   - COMPOUNDING: Deploy amount is computed from wallet size — larger wallet = larger position. Use the amount provided in the cycle goal, do NOT default to a smaller fixed number.\n   - Focus on one high-conviction deployment per cycle.\n   - BIN STEP SCALING: Lower bin_step pools need MORE bins for the same % range. bin_step 20 needs 5x more bins than bin_step 100. Always calculate: bins = ceil(log(1 - pct) / log(1 + bin_step/10000)). Wide ranges (>69 bins) are handled automatically via multi-tx.\n---",
+      "modified_text": "---\n1. SCREEN: Use get_top_candidates or discover_pools.\n2. STUDY: Call study_top_lpers. Look for high win rates, sustainable volume, strategy choices (bid_ask vs spot), and hold times. Do NOT use avg_range_pct for your range — size from the volatility table in range selection rules instead.\n3. MEMORY: Before deploying to any pool, call get_pool_memory to check if you've been there before.\n4. POOL AGE: Call get_pool_info to verify minimum 24 hours since pool creation. Pools < 24h old are HARD SKIP — high rug/migration risk, low organic volume signal.\n5. SMART WALLETS + TOKEN CHECK: Call check_smart_wallets_on_pool, then call get_token_narrative before deciding:\n   - global_fees_sol = total priority/jito tips paid by ALL traders on this token (NOT Meteora LP fees — completely different).\n   - HARD SKIP if global_fees_sol < minTokenFeesSol (default 30 SOL). Low fees = bundled txs or scam. No exceptions.\n   - Smart wallets present + fees pass → strong signal, proceed to deploy.\n   - No smart wallets → also call get_token_narrative before deciding:\n     * SKIP if top_10_real_holders_pct > 60% OR bundlers > 30% OR narrative is empty/null/pure hype with no specific story\n     * CAUTION if bundlers 15–30% AND top_10 > 40% — check organic + buy/sell pressure\n     * Bundlers 5–15% are normal, not a skip signal on their own\n     * GOOD narrative: specific origin (real event, viral moment, named entity, active community actions) AND token has NOT already pumped significantly (check recent price chart — if rally already occurred, skip even if narrative exists, as upside is already captured by earlier buyers)\n     * BAD narrative: generic hype (\"next 100x\", \"community token\") with no identifiable subject or story\n     * DEPLOY if global_fees_sol passes, distribution is healthy, narrative has a real specific catalyst, AND token has not already rallied\n6. DEPLOY: get_active_bin then deploy_position.\n   - HARD RULE: Minimum 0.1 SOL absolute floor (prefer 0.5+).\n   - COMPOUNDING: Deploy amount is computed from wallet size — larger wallet = larger position. Use the amount provided in the cycle goal, do NOT default to a smaller fixed number.\n   - Focus on one high-conviction deployment per cycle.\n   - BIN STEP SCALING: Lower bin_step pools need MORE bins for the same % range. bin_step 20 needs 5x more bins than bin_step 100. Always calculate: bins = ceil(log(1 - pct) / log(1 + bin_step/10000)). Wide ranges (>69 bins) are handled automatically via multi-tx.\n---",
+      "started_at": "2026-03-30T15:38:27.526Z",
+      "started_at_position": 439,
+      "baseline": {
+        "win_rate": 71.4,
+        "avg_pnl_pct": 8.52,
+        "positions": 7
+      },
+      "trial": {
+        "win_rate": 71.4,
+        "avg_pnl_pct": 2.64,
+        "positions": 7
+      },
+      "status": "reverted",
+      "weights_at_start": {
+        "organic_score": 2.5,
+        "fee_tvl_ratio": 1.369,
+        "volume": 0.323,
+        "mcap": 0.518,
+        "holder_count": 0.615,
+        "smart_wallets_present": 1,
+        "narrative_quality": 1,
+        "study_win_rate": 2.441,
+        "hive_consensus": 1,
+        "volatility": 0.806,
+        "ath_proximity": 1
+      }
+    },
+    {
+      "id": "exp_1774898337267",
+      "section": "screener_criteria",
+      "hypothesis": "The external close failures (ORANGEWHALE, oskkpu, PIXEL) suggest insufficient filtering of low-stability pools. Tightening the \"SMART WALLETS + TOKEN CHECK\" section with mandatory liquidity/TVL thresholds and strengthening the bundler exclusion will reduce exposure to pools vulnerable to external manipulation.",
+      "original_text": "---\n1. SCREEN: Use get_top_candidates or discover_pools.\n2. STUDY: Call study_top_lpers. Look for high win rates, sustainable volume, strategy choices (bid_ask vs spot), and hold times. Do NOT use avg_range_pct for your range — size from the volatility table in range selection rules instead.\n3. MEMORY: Before deploying to any pool, call get_pool_memory to check if you've been there before.\n4. SMART WALLETS + TOKEN CHECK: Call check_smart_wallets_on_pool, then call get_token_narrative before deciding:\n   - global_fees_sol = total priority/jito tips paid by ALL traders on this token (NOT Meteora LP fees — completely different).\n   - HARD SKIP if global_fees_sol < minTokenFeesSol (default 30 SOL). Low fees = bundled txs or scam. No exceptions.\n   - Smart wallets present + fees pass → strong signal, proceed to deploy.\n   - No smart wallets → also call get_token_narrative before deciding:\n     * SKIP if top_10_real_holders_pct > 60% OR bundlers > 30% OR narrative is empty/null/pure hype with no specific story\n     * CAUTION if bundlers 15–30% AND top_10 > 40% — check organic + buy/sell pressure\n     * Bundlers 5–15% are normal, not a skip signal on their own\n     * GOOD narrative: specific origin (real event, viral moment, named entity, active community actions) AND token has NOT already pumped significantly (check recent price chart — if rally already occurred, skip even if narrative exists, as upside is already captured by earlier buyers)\n     * BAD narrative: generic hype (\"next 100x\", \"community token\") with no identifiable subject or story\n     * DEPLOY if global_fees_sol passes, distribution is healthy, narrative has a real specific catalyst, AND token has not already rallied\n5. DEPLOY: get_active_bin then deploy_position.\n   - HARD RULE: Minimum 0.1 SOL absolute floor (prefer 0.5+).\n   - COMPOUNDING: Deploy amount is computed from wallet size — larger wallet = larger position. Use the amount provided in the cycle goal, do NOT default to a smaller fixed number.\n   - Focus on one high-conviction deployment per cycle.\n   - BIN STEP SCALING: Lower bin_step pools need MORE bins for the same % range. bin_step 20 needs 5x more bins than bin_step 100. Always calculate: bins = ceil(log(1 - pct) / log(1 + bin_step/10000)). Wide ranges (>69 bins) are handled automatically via multi-tx.\n---",
+      "modified_text": "---\n1. SCREEN: Use get_top_candidates or discover_pools.\n2. STUDY: Call study_top_lpers. Look for high win rates, sustainable volume, strategy choices (bid_ask vs spot), and hold times. Do NOT use avg_range_pct for your range — size from the volatility table in range selection rules instead.\n3. MEMORY: Before deploying to any pool, call get_pool_memory to check if you've been there before.\n4. SMART WALLETS + TOKEN CHECK: Call check_smart_wallets_on_pool, then call get_token_narrative before deciding:\n   - global_fees_sol = total priority/jito tips paid by ALL traders on this token (NOT Meteora LP fees — completely different).\n   - HARD SKIP if global_fees_sol < minTokenFeesSol (default 30 SOL). Low fees = bundled txs or scam. No exceptions.\n   - **HARD SKIP if bundlers > 25%** (lowered from 30% — tighter to avoid external manipulation).\n   - **HARD SKIP if top_10_real_holders_pct > 55%** (lowered from 60% — reduces exit risk from concentrated holders).\n   - Smart wallets present + fees pass → strong signal, proceed to deploy.\n   - No smart wallets → also call get_token_narrative before deciding:\n     * Bundlers 5–15% are normal, not a skip signal on their own\n     * CAUTION if bundlers 15–25% AND top_10 > 40% — check organic + buy/sell pressure\n     * GOOD narrative: specific origin (real event, viral moment, named entity, active community actions) AND token has NOT already pumped significantly (check recent price chart — if rally already occurred, skip even if narrative exists, as upside is already captured by earlier buyers)\n     * BAD narrative: generic hype (\"next 100x\", \"community token\") with no identifiable subject or story\n     * DEPLOY if global_fees_sol passes, distribution is healthy, narrative has a real specific catalyst, AND token has not already rallied\n5. DEPLOY: get_active_bin then deploy_position.\n   - HARD RULE: Minimum 0.1 SOL absolute floor (prefer 0.5+).\n   - COMPOUNDING: Deploy amount is computed from wallet size — larger wallet = larger position. Use the amount provided in the cycle goal, do NOT default to a smaller fixed number.\n   - Focus on one high-conviction deployment per cycle.\n   - BIN STEP SCALING: Lower bin_step pools need MORE bins for the same % range. bin_step 20 needs 5x more bins than bin_step 100. Always calculate: bins = ceil(log(1 - pct) / log(1 + bin_step/10000)). Wide ranges (>69 bins) are handled automatically via multi-tx.\n---",
+      "started_at": "2026-03-30T19:18:57.267Z",
+      "started_at_position": 452,
+      "baseline": {
+        "win_rate": 28.6,
+        "avg_pnl_pct": -4.21,
+        "positions": 7
+      },
+      "trial": {
+        "win_rate": 42.9,
+        "avg_pnl_pct": -1.31,
+        "positions": 7
+      },
+      "status": "kept",
+      "weights_at_start": {
+        "organic_score": 2.384,
+        "fee_tvl_ratio": 1.685,
+        "volume": 0.374,
+        "mcap": 0.47,
+        "holder_count": 0.652,
+        "smart_wallets_present": 1,
+        "narrative_quality": 1,
+        "study_win_rate": 2.5,
+        "hive_consensus": 1,
+        "volatility": 0.65,
+        "ath_proximity": 1
+      }
+    }
+  ],
+  "active": null,
+  "cooldownRemaining": 0,
+  "kept_overrides": {
+    "range_selection": "---\n- RANGE SIZING (volatility-driven — do NOT use study_top_lpers avg_range_pct for range):\n  Size your range from the pool's CURRENT conditions, not historical LPer behavior:\n\n  Pool Volatility  │ bid_ask range │ spot range  │ Reasoning\n  ─────────────────┼───────────────┼─────────────┼─────────────────────────────\n  >= 8  (extreme)  │ 55–75%        │ 65–85%      │ Wild swings, need maximum room\n  5–8   (high)     │ 45–60%        │ 55–70%      │ Active memecoin territory\n  2–5   (moderate) │ 40–55%        │ 50–65%      │ Normal volatile pool — stay wide\n  < 2   (low)      │ 35–45%        │ 40–50%      │ Ranging/stable, still need buffer\n  BIAS: Always pick the UPPER HALF of the range band. Wider is safer — tighter only if 3+ recent lessons confirm in-range stability for this exact pool.\n\n  Adjust from the table using your MEMORY and LESSONS:\n  - If LESSONS show repeated OOR downside on similar pools → go wider within the band\n  - If LESSONS show positions staying in range → go tighter for better fee concentration\n  - study_top_lpers patterns (hold time, strategy, win rate) are useful context but their avg_range_pct reflects a DIFFERENT market regime — do not copy it\n\n  **PUMP SCREENING for bid_ask:** If the token shows a strong recent pump (e.g., high organic_score decline, volume spike without matching TVL growth, or Memecoin flags), do NOT deploy bid_ask. Route to spot with sol_split_pct 80-90 instead. Bid_ask is fundamentally unsuitable when price is actively moving upward — it earns nothing until the pump ends.\n\n- OOR DIRECTION MATTERS — widening range only helps if OOR matches the direction your liquidity extends:\n  * bid_ask (SOL below active bin): range extends DOWNWARD only. Wider range helps with DOWNSIDE OOR. Widening CANNOT fix upside OOR — price pumped above your liquidity and no amount of extra bins below will reach it.\n  * If you keep going OOR-upside on bid_ask, the problem is NOT range width — the token is pumping away from your position. Either wait for the pump to end, use a two-sided strategy with token exposure (sol_split_pct < 100), or skip the pool entirely.\n  * spot (SOL-only, bins below): same as bid_ask — wider only helps downside OOR.\n  * spot (two-sided): wider range helps BOTH directions since liquidity spans above and below.\n  * NEVER generate a lesson saying \"use wider range\" for upside OOR on a single-sided-below strategy. That analysis is fundamentally wrong.\n- COMPOUNDING: Deploy amount is ${deployAmount} SOL (scaled from wallet: ${currentBalanceSol} SOL). Do NOT override with a smaller amount.\n- After deploy: update_config setting=managementIntervalMin based on volatility (>=5→3, 2-5→5, <2→10).\n- Report: strategy chosen + why, price_range_pct used + volatility basis, deploy amount, interval set.\n---",
+    "screener_criteria": "---\n1. SCREEN: Use get_top_candidates or discover_pools.\n2. STUDY: Call study_top_lpers. Look for high win rates, sustainable volume, strategy choices (bid_ask vs spot), and hold times. Do NOT use avg_range_pct for your range — size from the volatility table in range selection rules instead.\n3. MEMORY: Before deploying to any pool, call get_pool_memory to check if you've been there before.\n4. SMART WALLETS + TOKEN CHECK: Call check_smart_wallets_on_pool, then call get_token_narrative before deciding:\n   - global_fees_sol = total priority/jito tips paid by ALL traders on this token (NOT Meteora LP fees — completely different).\n   - HARD SKIP if global_fees_sol < minTokenFeesSol (default 30 SOL). Low fees = bundled txs or scam. No exceptions.\n   - **HARD SKIP if bundlers > 25%** (lowered from 30% — tighter to avoid external manipulation).\n   - **HARD SKIP if top_10_real_holders_pct > 55%** (lowered from 60% — reduces exit risk from concentrated holders).\n   - Smart wallets present + fees pass → strong signal, proceed to deploy.\n   - No smart wallets → also call get_token_narrative before deciding:\n     * Bundlers 5–15% are normal, not a skip signal on their own\n     * CAUTION if bundlers 15–25% AND top_10 > 40% — check organic + buy/sell pressure\n     * GOOD narrative: specific origin (real event, viral moment, named entity, active community actions) AND token has NOT already pumped significantly (check recent price chart — if rally already occurred, skip even if narrative exists, as upside is already captured by earlier buyers)\n     * BAD narrative: generic hype (\"next 100x\", \"community token\") with no identifiable subject or story\n     * DEPLOY if global_fees_sol passes, distribution is healthy, narrative has a real specific catalyst, AND token has not already rallied\n5. DEPLOY: get_active_bin then deploy_position.\n   - HARD RULE: Minimum 0.1 SOL absolute floor (prefer 0.5+).\n   - COMPOUNDING: Deploy amount is computed from wallet size — larger wallet = larger position. Use the amount provided in the cycle goal, do NOT default to a smaller fixed number.\n   - Focus on one high-conviction deployment per cycle.\n   - BIN STEP SCALING: Lower bin_step pools need MORE bins for the same % range. bin_step 20 needs 5x more bins than bin_step 100. Always calculate: bins = ceil(log(1 - pct) / log(1 + bin_step/10000)). Wide ranges (>69 bins) are handled automatically via multi-tx.\n---"
+  }
+}

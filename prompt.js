@@ -52,10 +52,11 @@ function _defaultRangeSelectionText(deployAmount, currentBalanceSol) {
 
   Pool Volatility  │ bid_ask range │ spot range  │ Reasoning
   ─────────────────┼───────────────┼─────────────┼─────────────────────────────
-  >= 8  (extreme)  │ 50–70%        │ 60–80%      │ Wild swings, need room
-  5–8   (high)     │ 40–55%        │ 50–65%      │ Active memecoin territory
-  2–5   (moderate) │ 30–45%        │ 40–55%      │ Normal volatile pool
-  < 2   (low)      │ 25–35%        │ 30–40%      │ Ranging/stable, tighter = more fees
+  >= 8  (extreme)  │ 55–75%        │ 65–85%      │ Wild swings, need maximum room
+  5–8   (high)     │ 45–60%        │ 55–70%      │ Active memecoin territory
+  2–5   (moderate) │ 40–55%        │ 50–65%      │ Normal volatile pool — stay wide
+  < 2   (low)      │ 35–45%        │ 40–50%      │ Ranging/stable, still need buffer
+  BIAS: Always pick the UPPER HALF of the range band. Wider is safer — tighter only if 3+ recent lessons confirm in-range stability for this exact pool.
 
   Adjust from the table using your MEMORY and LESSONS:
   - If LESSONS show repeated OOR downside on similar pools → go wider within the band
