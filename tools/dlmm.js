@@ -104,6 +104,7 @@ export async function deployPosition({
   sol_split_pct,   // for two-sided spot: SOL side % of total range (e.g. 80 = 80% below, 20% above). Default 50.
   // optional pool metadata for learning (passed by agent when available)
   pool_name,
+  base_mint,
   bin_step,
   volatility,
   fee_tvl_ratio,
@@ -118,6 +119,44 @@ export async function deployPosition({
 
   if (!["bid_ask", "spot"].includes(activeStrategy)) {
     throw new Error("Only 'bid_ask' or 'spot' strategies are allowed.");
+  }
+
+  // ─── Hard guard: no duplicate pool/token deployments ────────────
+  {
+    const { load: loadState } = await import("../state.js");
+    const stateData = loadState();
+    const openPositions = Object.values(stateData.positions).filter(p => !p.closed);
+
+    // Block deploying to a pool we already have a position in
+    const poolMatch = openPositions.find(p => p.pool === pool_address);
+    if (poolMatch) {
+      return {
+        success: false,
+        error: `Already have an open position in this pool (${poolMatch.pool_name || pool_address.slice(0, 8)}). Close it first.`,
+      };
+    }
+
+    // Block deploying to a token we already have exposure to (different pool, same base mint)
+    if (base_mint) {
+      const mintMatch = openPositions.find(p => p.base_mint === base_mint && p.pool !== pool_address);
+      if (mintMatch) {
+        return {
+          success: false,
+          error: `Already have exposure to this token via ${mintMatch.pool_name || mintMatch.pool?.slice(0, 8)}. Close that position first or pick a different token.`,
+        };
+      }
+    }
+
+    // Check blacklist
+    try {
+      const { isBlacklisted } = await import("../token-blacklist.js");
+      if (base_mint && isBlacklisted(base_mint)) {
+        return {
+          success: false,
+          error: `Token ${base_mint.slice(0, 8)} is blacklisted. Cannot deploy.`,
+        };
+      }
+    } catch { /* blacklist module may not exist */ }
   }
 
   if (price_range_pct > 0 && !resolvedBinStep) {
