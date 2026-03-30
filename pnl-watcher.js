@@ -8,7 +8,7 @@
 
 import { log } from "./logger.js";
 import { config } from "./config.js";
-import { updatePnlAndCheckExits } from "./state.js";
+import { updatePnlAndCheckExits, getTrackedPosition } from "./state.js";
 import { getMyPositions, closePosition } from "./tools/dlmm.js";
 import { getWalletBalances, swapToken } from "./tools/wallet.js";
 import { emit } from "./notifier.js";
@@ -62,6 +62,14 @@ export async function runPnlWatcher() {
     for (const p of positions) {
       // Skip positions without PnL data
       if (p.pnl_pct == null) continue;
+
+      // Skip positions younger than 2 minutes — PnL data is unreliable
+      // immediately after deploy (LP Agent returns stale/estimated values)
+      const tracked = getTrackedPosition(p.position);
+      if (tracked?.deployed_at) {
+        const ageMs = Date.now() - new Date(tracked.deployed_at).getTime();
+        if (ageMs < 120_000) continue; // 2 minutes
+      }
 
       try {
         // Check trailing TP / stop loss via state.js
