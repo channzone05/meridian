@@ -148,7 +148,8 @@ If no candidate is suitable, respond with:
 function runCodexExec(model, prompt) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    const child = spawn("codex", [
+    const codexBin = process.env.CODEX_PATH || "codex";
+    const child = spawn(codexBin, [
       "exec",
       "--model", model,
       "-c", "model_reasoning_effort=\"high\"",
@@ -159,6 +160,7 @@ function runCodexExec(model, prompt) {
     ], {
       timeout: 180000,
       env: { ...process.env },
+      shell: true,
     });
 
     child.stdout.on("data", (data) => chunks.push(data.toString()));
