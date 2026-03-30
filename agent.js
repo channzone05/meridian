@@ -1,9 +1,10 @@
+import { spawn } from "child_process";
 import OpenAI from "openai";
 import { buildSystemPrompt } from "./prompt.js";
 import { executeTool } from "./tools/executor.js";
 import { tools } from "./tools/definitions.js";
 import { getWalletBalances } from "./tools/wallet.js";
-import { getMyPositions } from "./tools/dlmm.js";
+import { getMyPositions, getActiveBin } from "./tools/dlmm.js";
 import { log } from "./logger.js";
 import { config } from "./config.js";
 import { getStateSummary } from "./state.js";
@@ -11,6 +12,10 @@ import { getLessonsForPrompt, getPerformanceSummary } from "./lessons.js";
 import { getMemoryContext } from "./memory.js";
 import { getWeightsSummary } from "./signal-weights.js";
 import { getLpOverviewSummary } from "./tools/lp-overview.js";
+import { getTopCandidates, fetchDynamicFee } from "./tools/screening.js";
+import { studyTopLPers } from "./tools/study.js";
+import { checkSmartWalletsOnPool } from "./smart-wallets.js";
+import { getTokenHolders, getTokenNarrative, getTokenInfo } from "./tools/token.js";
 
 // Configurable LLM provider: "openrouter" (default) or "deepseek"
 const provider = process.env.LLM_PROVIDER || "openrouter";
@@ -26,6 +31,168 @@ const client = new OpenAI({
 const DEFAULT_MODEL = process.env.LLM_MODEL || "openai/gpt-5.4-nano";
 
 /**
+ * Codex CLI-based agent loop for screening.
+ * Pre-fetches screening data in-process, sends it to Codex for analysis,
+ * then executes deployment decisions through executeTool.
+ *
+ * Flow: gather data → Codex analyzes → parse JSON decision → execute deploy
+ *
+ * @param {string} goal - The original screening goal
+ * @param {number} maxSteps - Unused (kept for interface parity)
+ * @param {string} systemPrompt - Full system prompt with portfolio/LP context
+ * @returns {Promise<{content: string, userMessage: string}>}
+ */
+async function codexAgentLoop(goal, maxSteps, systemPrompt) {
+  const model = config.llm.codexModel || "gpt-5.4";
+  log("agent", `Codex screening via CLI (model: ${model})`);
+
+  // ─── Step 1: Pre-fetch screening data in-process ───────────
+  const candidates = await getTopCandidates({ limit: 5 });
+  if (!candidates?.candidates?.length) {
+    return { content: "No eligible candidates found this cycle.", userMessage: goal };
+  }
+
+  // Study top LPers for the best candidate
+  const top = candidates.candidates[0];
+  const [study, tokenInfo] = await Promise.all([
+    studyTopLPers({ pool_address: top.pool_address }).catch(() => null),
+    getTokenInfo({ mint: top.base_mint }).catch(() => null),
+  ]);
+
+  // ─── Step 2: Build Codex prompt with pre-fetched data ──────
+  const dataBlock = [
+    `CANDIDATES:\n${JSON.stringify(candidates.candidates, null, 2)}`,
+    study ? `\nTOP LPER STUDY (${top.name}):\n${JSON.stringify(study, null, 2)}` : "",
+    tokenInfo ? `\nTOKEN INFO (${top.name}):\n${JSON.stringify(tokenInfo, null, 2)}` : "",
+  ].join("\n");
+
+  const decisionPrompt = `${systemPrompt}
+
+${dataBlock}
+
+---
+TASK:
+${goal}
+
+IMPORTANT: You must respond with a JSON deployment plan. If you recommend deploying, respond with ONLY a JSON block like:
+\`\`\`json
+{
+  "action": "deploy",
+  "pool_address": "<address>",
+  "pool_name": "<name>",
+  "base_mint": "<mint>",
+  "strategy": "bid_ask" | "spot",
+  "price_range_pct": <number>,
+  "amount_sol": <number>,
+  "sol_split_pct": <number or null>,
+  "reasoning": "<brief explanation>"
+}
+\`\`\`
+If no candidate is suitable, respond with:
+\`\`\`json
+{ "action": "skip", "reasoning": "<why>" }
+\`\`\``;
+
+  // ─── Step 3: Send to Codex CLI ─────────────────────────────
+  const codexResponse = await runCodexExec(model, decisionPrompt);
+  log("agent", `Codex response: ${codexResponse.slice(0, 500)}`);
+
+  // ─── Step 4: Parse decision and execute ────────────────────
+  const jsonMatch = codexResponse.match(/```json\s*([\s\S]*?)```/) || codexResponse.match(/(\{[\s\S]*\})/);
+  if (!jsonMatch) {
+    log("agent", "Codex returned no parseable JSON, returning text response");
+    return { content: codexResponse, userMessage: goal };
+  }
+
+  let plan;
+  try {
+    plan = JSON.parse(jsonMatch[1]);
+  } catch {
+    log("agent", "Failed to parse Codex JSON decision");
+    return { content: codexResponse, userMessage: goal };
+  }
+
+  if (plan.action === "skip") {
+    const msg = `Codex screening: SKIP — ${plan.reasoning}`;
+    log("agent", msg);
+    return { content: msg, userMessage: goal };
+  }
+
+  if (plan.action === "deploy") {
+    log("agent", `Codex recommends deploy: ${plan.pool_name} (${plan.strategy}, range ${plan.price_range_pct}%)`);
+
+    const deployArgs = {
+      pool_address: plan.pool_address,
+      pool_name: plan.pool_name,
+      base_mint: plan.base_mint,
+      strategy: plan.strategy || "bid_ask",
+      price_range_pct: plan.price_range_pct,
+      amount_sol: plan.amount_sol,
+      ...(plan.sol_split_pct != null && { sol_split_pct: plan.sol_split_pct }),
+    };
+
+    const result = await executeTool("deploy_position", deployArgs);
+    const summary = result.error || result.blocked
+      ? `Codex screening: deploy blocked — ${result.reason || result.error}`
+      : `Codex screening: deployed ${plan.amount_sol} SOL to ${plan.pool_name} (${plan.strategy}, range ${plan.price_range_pct}%). Reasoning: ${plan.reasoning}`;
+
+    return { content: summary, userMessage: goal };
+  }
+
+  return { content: codexResponse, userMessage: goal };
+}
+
+/**
+ * Spawn `codex exec` and return its text output.
+ */
+function runCodexExec(model, prompt) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    const child = spawn("codex", [
+      "exec",
+      "--model", model,
+      "-c", "model_reasoning_effort=\"high\"",
+      "--full-auto",
+      "--skip-git-repo-check",
+      "-C", process.cwd(),
+      prompt,
+    ], {
+      timeout: 180000,
+      env: { ...process.env },
+    });
+
+    child.stdout.on("data", (data) => chunks.push(data.toString()));
+    child.stderr.on("data", (data) => log("codex", data.toString().trim()));
+
+    child.on("close", (code) => {
+      const output = chunks.join("");
+      if (code !== 0 && !output) {
+        reject(new Error(`Codex CLI exited with code ${code}`));
+        return;
+      }
+      // Try to extract the last assistant message from JSONL output
+      try {
+        const lines = output.trim().split("\n").filter(Boolean);
+        for (let i = lines.length - 1; i >= 0; i--) {
+          const event = JSON.parse(lines[i]);
+          if (event.type === "message" && event.role === "assistant" && event.content) {
+            resolve(typeof event.content === "string"
+              ? event.content
+              : event.content.map(c => c.text || "").join("\n"));
+            return;
+          }
+        }
+      } catch {
+        // Not JSON — use raw output
+      }
+      resolve(output);
+    });
+
+    child.on("error", (err) => reject(err));
+  });
+}
+
+/**
  * Core ReAct agent loop.
  *
  * @param {string} goal - The task description for the agent
@@ -33,6 +200,26 @@ const DEFAULT_MODEL = process.env.LLM_MODEL || "openai/gpt-5.4-nano";
  * @returns {string} - The agent's final text response
  */
 export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHistory = [], agentType = "GENERAL", model = null) {
+  // Route to Codex CLI when codexScreening is enabled for SCREENER agent
+  if (config.llm.codexScreening && agentType === "SCREENER") {
+    const [portfolio, positions] = await Promise.all([getWalletBalances(), getMyPositions()]);
+    const stateSummary = getStateSummary();
+    const lessons = getLessonsForPrompt({ agentType });
+    const perfSummary = getPerformanceSummary();
+    const memoryContext = getMemoryContext();
+    const signalWeights = getWeightsSummary() || null;
+    let systemPrompt = buildSystemPrompt(agentType, portfolio, positions, stateSummary, lessons, perfSummary, memoryContext, signalWeights);
+    const lpSummary = await getLpOverviewSummary().catch(() => null);
+    if (lpSummary) {
+      systemPrompt += `\n\nLP AGENT PERFORMANCE (real data from LP Agent API — use this for accurate PnL):\n${lpSummary}\n`;
+    }
+    try {
+      return await codexAgentLoop(goal, maxSteps, systemPrompt);
+    } catch (err) {
+      log("agent", `Codex CLI failed (${err.message}), falling back to OpenRouter`);
+    }
+  }
+
   // Build dynamic system prompt with current portfolio state
   const [portfolio, positions] = await Promise.all([getWalletBalances(), getMyPositions()]);
   const stateSummary = getStateSummary();

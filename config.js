@@ -88,6 +88,8 @@ export const config = {
     managementModel: u.managementModel ?? process.env.LLM_MODEL ?? "openai/gpt-5.4-nano",
     screeningModel:  u.screeningModel  ?? process.env.LLM_MODEL ?? "openai/gpt-5.4-nano",
     generalModel:    u.generalModel    ?? process.env.LLM_MODEL ?? "openai/gpt-5.4-nano",
+    codexScreening: u.codexScreening ?? false,
+    codexModel: u.codexModel ?? "gpt-5.4",
   },
 
   // ─── Web UI ───────────────────────────
@@ -137,6 +139,111 @@ export function computeDeployAmount(walletSol) {
   const dynamic    = deployable * pct;
   const result     = Math.min(ceil, Math.max(floor, dynamic));
   return parseFloat(result.toFixed(2));
+}
+
+// Keys that map into each config section
+const SECTION_MAP = {
+  screening: new Set(Object.keys(config.screening)),
+  management: new Set(Object.keys(config.management)),
+  risk: new Set(Object.keys(config.risk)),
+  schedule: new Set(Object.keys(config.schedule)),
+  strategy: new Set(Object.keys(config.strategy)),
+  llm: new Set(Object.keys(config.llm)),
+  research: config.research ? new Set(Object.keys(config.research)) : new Set(),
+};
+
+// Keys that no caller may change
+const LOCKED_KEYS = new Set(["walletKey", "rpcUrl", "llmModel"]);
+
+// Keys that atlas_autotune may NOT change (cadence / owner-level)
+const ATLAS_DISALLOWED = new Set([
+  "managementIntervalMin",
+  "healthCheckIntervalMin",
+  "pnlWatcherIntervalSec",
+]);
+
+// Keys whose values should be rounded to the nearest integer
+const INTEGER_KEYS = new Set([
+  "minTvl", "maxTvl", "minVolume", "minOrganic", "minHolders",
+  "minMcap", "maxMcap", "minBinStep", "maxBinStep", "maxVolatility",
+  "maxPriceChangePct", "minTokenFeesSol", "athTopThresholdPct",
+  "maxTop10Pct", "maxBundlersPct",
+  "outOfRangeBinsToClose", "outOfRangeWaitMinutes",
+  "emergencyPriceDropPct", "stopLossPct", "takeProfitFeePct",
+  "maxPositions", "maxDeployAmount",
+  "managementIntervalMin", "screeningIntervalMin",
+  "healthCheckIntervalMin", "pnlWatcherIntervalSec",
+  "maxTokens", "maxSteps",
+]);
+
+function findSection(key) {
+  for (const [name, keys] of Object.entries(SECTION_MAP)) {
+    if (keys.has(key)) return name;
+  }
+  return null;
+}
+
+/**
+ * Apply a set of config changes to the in-memory config and persist them
+ * to user-config.json.  Returns { success, applied, normalized, rejected }.
+ */
+export function applyConfigChanges({ changes = {}, source = "manual", reason = "" } = {}) {
+  const applied = {};
+  const normalized = {};
+  const rejected = { locked: {}, atlas_disallowed: {}, unknown: {} };
+
+  for (const [key, value] of Object.entries(changes)) {
+    // Block locked keys
+    if (LOCKED_KEYS.has(key)) {
+      rejected.locked[key] = value;
+      continue;
+    }
+
+    // Block atlas-disallowed keys when source is atlas_autotune
+    if (source === "atlas_autotune" && ATLAS_DISALLOWED.has(key)) {
+      rejected.atlas_disallowed[key] = value;
+      continue;
+    }
+
+    const section = findSection(key);
+    if (!section) {
+      rejected.unknown[key] = value;
+      continue;
+    }
+
+    // Normalize
+    let final = value;
+    if (INTEGER_KEYS.has(key) && typeof value === "number") {
+      final = Math.round(value);
+    }
+
+    config[section][key] = final;
+    applied[key] = final;
+    if (final !== value) normalized[key] = final;
+  }
+
+  // Persist applied changes to user-config.json
+  if (Object.keys(applied).length > 0) {
+    try {
+      const existing = fs.existsSync(USER_CONFIG_PATH)
+        ? JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8"))
+        : {};
+      Object.assign(existing, applied);
+      fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(existing, null, 2));
+    } catch { /* best effort */ }
+  }
+
+  // Clean up empty rejection buckets
+  for (const bucket of Object.keys(rejected)) {
+    if (Object.keys(rejected[bucket]).length === 0) delete rejected[bucket];
+  }
+
+  return {
+    success: Object.keys(applied).length > 0,
+    applied,
+    normalized,
+    rejected,
+  };
 }
 
 /**

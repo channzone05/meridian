@@ -15,6 +15,9 @@
   "screeningModel": "deepseek-reasoner",
   "generalModel": "deepseek-chat",
 
+  "codexScreening": false,
+  "codexModel": "gpt-5.4",
+
   "minFeeActiveTvlRatio": 0.05,
   "minTvl": 10000,
   "maxTvl": 150000,
