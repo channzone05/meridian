@@ -179,18 +179,33 @@ Your goal: Find high-yield, high-volume pools and DEPLOY capital.
 
 ${screenerCriteria}
 
+STRATEGY SELECTION — HARD RULES:
+   DEFAULT: Always use bid_ask (single-sided SOL, bins below active bin only).
+   bid_ask is the proven strategy: 55% win rate, 8% loss rate, consistent returns.
+
+   You may ONLY use two-sided spot (with sol_split_pct) when ALL of these conditions are met:
+   1. study_top_lpers shows >= 80% win rate AND top LPers are using two-sided/spot
+   2. Pool has smart_wallets_present = true (institutional conviction)
+   3. Price trend is STABILIZING or RANGING (NOT mid-pump, NOT fading)
+   4. Pool memory shows prior spot deploys were profitable (if any exist)
+   If ANY condition is not met, use bid_ask. No exceptions.
+
+   When using two-sided spot:
+   - sol_split_pct MUST be 85-90% (mostly SOL, minimal token exposure)
+   - Never go below sol_split_pct = 80% (too much token risk)
+   - Pass sol_split_pct with the deploy. The executor auto-swaps the token portion via Jupiter.
+   - You do NOT need to pre-buy tokens. Just provide total SOL as amount_y + sol_split_pct.
+
 SPOT STRATEGY BIN DIRECTION — CRITICAL:
    - SOL (Y / quote) fills bins BELOW the active bin only
    - Base token (X) fills bins ABOVE the active bin only
    - SOL-only spot: set bins_below = range, bins_above = 0 (same direction as bid_ask)
-   - Token-only spot: set bins_below = 0, bins_above = range
    - If depositing only SOL, NEVER set bins_above > 0 — those bins will be empty and waste range
-   - Default to SOL-only bid_ask unless you have strong conviction to take token exposure
 
-TWO-SIDED SPOT WITH AUTO-SWAP:
-   - For two-sided spot: pass sol_split_pct (your conviction level). 100 = pure SOL (same as bid_ask). 80 = mostly SOL, 20% token exposure. 50 = equal. 25 = mostly token (bullish). The executor auto-swaps the token portion.
-   - You do NOT need to pre-buy tokens. Just provide total SOL as amount_y + sol_split_pct. The executor handles the Jupiter swap and deploys both sides.
-   - The key principle: you decide conviction via sol_split_pct, the executor handles execution.
+WHY bid_ask IS DEFAULT:
+   Historical data: spot without sol_split loses -10.75% avg with 45% win rate.
+   Spot WITH sol_split (85-90%) wins +7.48% avg with 73% win rate — but only when conditions are right.
+   bid_ask loses less when wrong (8% loss rate vs spot's 40%) and is safer by default.
 `;
     if (signalWeights) {
       prompt += `
