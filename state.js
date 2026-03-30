@@ -431,6 +431,32 @@ export async function syncOpenPositions(active_addresses) {
     } catch (e) {
       log("state_warn", `Could not fetch LP Agent data for closed position ${posId}: ${e.message}`);
     }
+
+    // ─── Hard rule: swap base token back to SOL after sync-close ───
+    try {
+      const baseMint = pos.base_mint;
+      const SOL = "So11111111111111111111111111111111111111112";
+      if (baseMint && baseMint !== SOL) {
+        const { getWalletBalances, swapToken } = await import("./tools/wallet.js");
+        const walletBals = await getWalletBalances();
+        const baseToken = walletBals.tokens?.find((t) => t.mint === baseMint);
+        if (baseToken && baseToken.balance > 0 && (baseToken.usd ?? 0) >= 0.10) {
+          log("state", `Post-sync-close: swapping ${baseToken.balance} ${baseToken.symbol || baseMint.slice(0, 8)} -> SOL (worth $${baseToken.usd})`);
+          const swapResult = await swapToken({
+            input_mint: baseMint,
+            output_mint: SOL,
+            amount: baseToken.balance,
+          });
+          if (swapResult?.success) {
+            log("state", `Post-sync-close swap OK: tx ${swapResult.tx}`);
+          } else {
+            log("state_warn", `Post-sync-close swap failed: ${swapResult?.error || "unknown"}`);
+          }
+        }
+      }
+    } catch (swapErr) {
+      log("state_warn", `Post-sync-close swap error: ${swapErr.message}`);
+    }
   }
 
   if (changed) save(state);
