@@ -230,16 +230,32 @@ export async function deployPosition({
       });
 
       if (swapResult.success) {
-        // swapResult.amount_out is in raw units (lamports/smallest unit) — convert to human-readable
+        // Read actual wallet token balance after swap — more reliable than
+        // swapResult.amount_out which can differ from what's actually available
+        // due to fees, rounding, or existing token dust in the wallet.
         const mintInfo = await getConnection().getParsedAccountInfo(new PublicKey(baseMint));
         const decimals = mintInfo.value?.data?.parsed?.info?.decimals ?? 9;
-        const receivedTokens = Number(swapResult.amount_out) / Math.pow(10, decimals);
+        const swapReceived = Number(swapResult.amount_out) / Math.pow(10, decimals);
 
-        amount_x = receivedTokens;
+        // Query actual on-chain balance to use for deploy
+        let actualBalance = swapReceived;
+        try {
+          const walletBals = await getWalletBalances();
+          const tokenBal = walletBals.tokens?.find(t => t.mint === baseMint);
+          if (tokenBal && tokenBal.balance > 0) {
+            actualBalance = tokenBal.balance;
+            if (Math.abs(actualBalance - swapReceived) > 0.01) {
+              log("deploy", `Token balance ${actualBalance} differs from swap output ${swapReceived} — using actual balance`);
+            }
+          }
+        } catch { /* use swap output as fallback */ }
+
+        // Apply 2% buffer so SDK simulation doesn't fail on rounding
+        amount_x = actualBalance * 0.98;
         amount_y = totalSolAmount - tokenSolAmount;
         hasBaseToken = true;
 
-        log("deploy", `Auto-swapped ${tokenSolAmount.toFixed(4)} SOL → ${receivedTokens} tokens (${decimals} decimals). Deploying ${amount_y.toFixed(4)} SOL + ${receivedTokens} X`);
+        log("deploy", `Auto-swapped ${tokenSolAmount.toFixed(4)} SOL → ${swapReceived} tokens (${decimals} decimals). Deploying ${amount_y.toFixed(4)} SOL + ${amount_x.toFixed(6)} X (2% buffer applied)`);
       } else {
         log("deploy", `WARNING: Auto-swap failed (${swapResult.error}), falling back to SOL-only deployment`);
         // Fall back: keep original amounts, revert to the full SOL-only range.
@@ -774,7 +790,11 @@ export async function getMyPositions({ force = false } = {}) {
       const tracked = getTrackedPosition(r.position);
 
       // Auto-adopt untracked positions (manually opened or from external tools)
-      if (!tracked && p) {
+      // Skip empty position accounts (0 value) — these are ghost accounts from
+      // failed deploys or the gap between createPosition and addLiquidity in wide-range deploys
+      const positionValue = parseFloat(p?.unrealizedPnl?.balances || 0)
+        + parseFloat(p?.allTimeDeposits?.total?.usd || 0);
+      if (!tracked && p && positionValue > 0.10) {
         try {
           const { getPoolDetail } = await import("./screening.js");
           const poolDetail = await getPoolDetail({ pool_address: r.pool, timeframe: "1h" }).catch(() => null);
@@ -1170,7 +1190,7 @@ export async function closePosition({ position_address, _pnlOverride = null }) {
         pool_name: tracked.pool_name || poolAddress.slice(0, 8),
         strategy: tracked.strategy,
         strategy_type: tracked.strategy_type || null,
-        sol_split_pct: tracked.sol_split_pct || null,
+        sol_split_pct: tracked.sol_split_pct ?? null,
         bin_range: tracked.bin_range,
         bin_step: tracked.bin_step || null,
         volatility: tracked.volatility || null,
@@ -1194,6 +1214,32 @@ export async function closePosition({ position_address, _pnlOverride = null }) {
         const { forgetPositionSnapshot } = await import("../memory.js");
         forgetPositionSnapshot(tracked);
       } catch { /* best-effort */ }
+
+      // ─── Hard rule: always swap base token back to SOL after close ───
+      try {
+        const baseMint = tracked.base_mint;
+        const SOL = "So11111111111111111111111111111111111111112";
+        if (baseMint && baseMint !== SOL) {
+          const walletBals = await getWalletBalances();
+          const baseToken = walletBals.tokens?.find((t) => t.mint === baseMint);
+          if (baseToken && baseToken.balance > 0 && (baseToken.usd ?? 0) >= 0.10) {
+            log("close", `Auto-swapping ${baseToken.balance} ${baseToken.symbol || baseMint.slice(0, 8)} -> SOL (worth $${baseToken.usd})`);
+            const swapResult = await swapToken({
+              input_mint: baseMint,
+              output_mint: SOL,
+              amount: baseToken.balance,
+            });
+            if (swapResult?.success) {
+              log("close", `Post-close swap OK: tx ${swapResult.tx}`);
+              txHashes.push(swapResult.tx);
+            } else {
+              log("close_warn", `Post-close swap failed: ${swapResult?.error || "unknown"}`);
+            }
+          }
+        }
+      } catch (swapErr) {
+        log("close_warn", `Post-close swap error: ${swapErr.message}`);
+      }
 
       return { success: true, position: position_address, pool: poolAddress, txs: txHashes, pnl_usd: pnlUsd, pnl_pct: pnlPct };
     }

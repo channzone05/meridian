@@ -59,6 +59,7 @@ function save(data) {
  * @param {string} perf.pool           - Pool address
  * @param {string} perf.pool_name      - Pool name (e.g. "Mustard-SOL")
  * @param {string} perf.strategy       - "spot" | "curve" | "bid_ask"
+ * @param {number} [perf.sol_split_pct]  - SOL split % (100=single-sided, <100=two-sided spot)
  * @param {number} perf.bin_range      - Bin range used
  * @param {number} perf.bin_step       - Pool bin step
  * @param {number} perf.volatility     - Pool volatility at deploy time
@@ -144,6 +145,7 @@ export async function recordPerformance(perf) {
         minutes_held: perf.minutes_held,
         close_reason: perf.close_reason,
         strategy: perf.strategy,
+        sol_split_pct: perf.sol_split_pct ?? null,
         volatility: perf.volatility,
         price_range_pct: deployRangePct,
       });
@@ -157,14 +159,21 @@ export async function recordPerformance(perf) {
     const outcome = pnl_pct >= 0 ? "profitable" : "unprofitable";
     const oorInfo = perf.close_reason?.match(/OOR (upside|downside)/)?.[1];
     const oorTag = oorInfo ? `, OOR_direction=${oorInfo}` : "";
+    const splitTag = (perf.sol_split_pct != null && perf.sol_split_pct < 100)
+      ? `, sol_split=${perf.sol_split_pct}%, two-sided` : "";
     rememberPoolOutcome(
       perf.pool_name || perf.pool,
-      `${outcome}, PnL ${pnl_pct.toFixed(1)}%, range_eff ${range_efficiency.toFixed(0)}%, strategy=${perf.strategy}, bin_step=${perf.bin_step}${oorTag}, vol=${perf.volatility}`
+      `${outcome}, PnL ${pnl_pct.toFixed(1)}%, range_eff ${range_efficiency.toFixed(0)}%, strategy=${perf.strategy}, bin_step=${perf.bin_step}${oorTag}${splitTag}, vol=${perf.volatility}`
     );
     if (perf.strategy && perf.bin_step) {
+      const isTwoSided = perf.sol_split_pct != null && perf.sol_split_pct < 100;
+      const strategyLabel = isTwoSided
+        ? `${perf.strategy}_2sided_bs${perf.bin_step}`
+        : `${perf.strategy}_bs${perf.bin_step}`;
+      const splitInfo = isTwoSided ? `, sol_split=${perf.sol_split_pct}%` : "";
       rememberStrategy(
-        `${perf.strategy}_bs${perf.bin_step}`,
-        `${outcome}, PnL ${pnl_pct.toFixed(1)}%, vol=${perf.volatility}, fee_tvl=${perf.fee_tvl_ratio}`
+        strategyLabel,
+        `${outcome}, PnL ${pnl_pct.toFixed(1)}%, vol=${perf.volatility}, fee_tvl=${perf.fee_tvl_ratio}${splitInfo}`
       );
     }
   } catch (e) {
@@ -248,13 +257,15 @@ function derivLesson(perf) {
     `fee_tvl_ratio=${perf.fee_tvl_ratio}`,
     `organic=${perf.organic_score}`,
     `bin_range=${typeof perf.bin_range === 'object' ? JSON.stringify(perf.bin_range) : perf.bin_range}`,
-  ].join(", ");
+    perf.sol_split_pct != null ? `sol_split_pct=${perf.sol_split_pct}` : null,
+  ].filter(Boolean).join(", ");
 
   let rule = "";
+  const isTwoSided = perf.sol_split_pct != null && perf.sol_split_pct < 100;
 
   if (outcome === "good" || outcome === "bad") {
     if (perf.range_efficiency < 30 && outcome === "bad") {
-      const isSingleSidedBelow = perf.strategy === "bid_ask" || perf.strategy === "spot"; // spot SOL-only also goes below
+      const isSingleSidedBelow = perf.strategy === "bid_ask" || (perf.strategy === "spot" && !isTwoSided);
       const dirHint = oorDir === "downside"
         ? " Price dropped below range (downside OOR) — SOL converted to token, realized loss. Wider range may help catch deeper dips."
         : oorDir === "upside" && isSingleSidedBelow
@@ -264,8 +275,10 @@ function derivLesson(perf) {
         : "";
       rule = `AVOID: ${perf.pool_name}-type pools (volatility=${perf.volatility}, bin_step=${perf.bin_step}) with strategy="${perf.strategy}" — went OOR ${100 - perf.range_efficiency}% of the time.${dirHint}`;
       tags.push("oor", oorDir || "unknown", perf.strategy, `volatility_${Math.round(perf.volatility)}`);
+      if (isTwoSided) tags.push("two-sided", `split_${perf.sol_split_pct}`);
     } else if (perf.range_efficiency > 80 && outcome === "good") {
-      rule = `PREFER: ${perf.pool_name}-type pools (volatility=${perf.volatility}, bin_step=${perf.bin_step}) with strategy="${perf.strategy}" — ${perf.range_efficiency}% in-range efficiency, PnL +${perf.pnl_pct}%.`;
+      const splitNote = isTwoSided ? ` (two-sided, sol_split=${perf.sol_split_pct}%)` : "";
+      rule = `PREFER: ${perf.pool_name}-type pools (volatility=${perf.volatility}, bin_step=${perf.bin_step}) with strategy="${perf.strategy}"${splitNote} — ${perf.range_efficiency}% in-range efficiency, PnL +${perf.pnl_pct}%.`;
       tags.push("efficient", perf.strategy);
     } else if (outcome === "bad" && perf.close_reason?.includes("volume")) {
       rule = `AVOID: Pools with fee_tvl_ratio=${perf.fee_tvl_ratio} that showed volume collapse — fees evaporated quickly. Minimum sustained volume check needed before deploying.`;

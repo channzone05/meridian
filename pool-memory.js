@@ -59,6 +59,7 @@ export function recordPoolDeploy(poolAddress, deployData) {
     minutes_held: deployData.minutes_held ?? null,
     close_reason: deployData.close_reason || null,
     strategy: deployData.strategy || null,
+    sol_split_pct: deployData.sol_split_pct ?? null,
     volatility_at_deploy: deployData.volatility ?? null,
     price_range_pct: deployData.price_range_pct ?? null,
   };
@@ -178,7 +179,11 @@ export function recallForPool(poolAddress) {
   if (entry.total_deploys > 0) {
     const ranges = entry.deploys.map(d => d.price_range_pct).filter(r => r != null);
     const rangeInfo = ranges.length > 0 ? `, avg range ${(ranges.reduce((a, b) => a + b, 0) / ranges.length).toFixed(0)}%` : "";
-    lines.push(`${entry.name}: ${entry.total_deploys} deploys, avg PnL ${entry.avg_pnl_pct}%, win rate ${(entry.win_rate * 100).toFixed(0)}%${rangeInfo}, last: ${entry.last_outcome}`);
+    const lastDeploy = entry.deploys[entry.deploys.length - 1];
+    const splitInfo = lastDeploy?.sol_split_pct != null && lastDeploy.sol_split_pct < 100
+      ? ` (two-sided, split=${lastDeploy.sol_split_pct}%)`
+      : "";
+    lines.push(`${entry.name}: ${entry.total_deploys} deploys, avg PnL ${entry.avg_pnl_pct}%, win rate ${(entry.win_rate * 100).toFixed(0)}%${rangeInfo}, last: ${entry.last_outcome}${splitInfo}`);
   }
 
   // Recent trend from snapshots (last 6 = ~30 min at 5-min intervals)

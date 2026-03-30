@@ -403,6 +403,8 @@ export async function syncOpenPositions(active_addresses) {
           pool: pos.pool || closedData.pool,
           pool_name: pos.pool_name || closedData.pair || "unknown",
           strategy: pos.strategy || closedData.strategy,
+          strategy_type: pos.strategy_type || null,
+          sol_split_pct: pos.sol_split_pct ?? null,
           bin_range: pos.bin_range || { min: closedData.lower_bin, max: closedData.upper_bin },
           bin_step: pos.bin_step || closedData.bin_step,
           volatility: pos.volatility || null,
