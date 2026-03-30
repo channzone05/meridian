@@ -144,11 +144,13 @@ If no candidate is suitable, respond with:
 
 /**
  * Spawn `codex exec` and return its text output.
+ * Pipes prompt via stdin (using "-") to avoid ENAMETOOLONG on large prompts.
  */
 function runCodexExec(model, prompt) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    const codexBin = process.env.CODEX_PATH || "codex";
+    const codexBin = process.env.CODEX_PATH || "/c/Users/fciaf/AppData/Roaming/npm/codex";
+
     const child = spawn(codexBin, [
       "exec",
       "--model", model,
@@ -156,12 +158,16 @@ function runCodexExec(model, prompt) {
       "--full-auto",
       "--skip-git-repo-check",
       "-C", process.cwd(),
-      prompt,
+      "-",  // read prompt from stdin
     ], {
       timeout: 180000,
       env: { ...process.env },
       shell: true,
     });
+
+    // Pipe the prompt via stdin
+    child.stdin.write(prompt);
+    child.stdin.end();
 
     child.stdout.on("data", (data) => chunks.push(data.toString()));
     child.stderr.on("data", (data) => log("codex", data.toString().trim()));
