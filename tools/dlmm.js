@@ -123,9 +123,8 @@ export async function deployPosition({
 
   // ─── Hard guard: no duplicate pool/token deployments ────────────
   {
-    const { load: loadState } = await import("../state.js");
-    const stateData = loadState();
-    const openPositions = Object.values(stateData.positions).filter(p => !p.closed);
+    const { getTrackedPositions } = await import("../state.js");
+    const openPositions = getTrackedPositions(true);
 
     // Block deploying to a pool we already have a position in
     const poolMatch = openPositions.find(p => p.pool === pool_address);
