@@ -384,20 +384,58 @@ export async function deployPosition({
         log("deploy", `Create tx ${i + 1}/${createTxArray.length}: ${txHash}`);
       }
 
-      // Phase 2: Add liquidity (may be multiple txs)
-      const addTxs = await pool.addLiquidityByStrategyChunkable({
-        positionPubKey: newPosition.publicKey,
-        user: wallet.publicKey,
-        totalXAmount: totalXLamports,
-        totalYAmount: totalYLamports,
-        strategy: { minBinId, maxBinId, strategyType },
-        slippage: 10, // 10%
+      // Track position IMMEDIATELY after on-chain creation so auto-adopt
+      // never picks it up as "unknown". If Phase 2 fails, the position
+      // is still tracked (with 0 liquidity) and can be cleaned up properly.
+      const posAddr = newPosition.publicKey.toString();
+      trackPosition({
+        position: posAddr,
+        pool: pool_address,
+        pool_name,
+        base_mint: pool.lbPair.tokenXMint.toBase58(),
+        strategy: activeStrategy,
+        strategy_type: activeStrategy === "bid_ask" ? "BidAsk" : (sol_split_pct === 100 ? "SpotOneSide" : "SpotTwoSide"),
+        sol_split_pct: sol_split_pct ?? (activeStrategy === "bid_ask" ? 100 : null),
+        bin_range: { min: minBinId, max: maxBinId, bins_below: activeBinsBelow, bins_above: activeBinsAbove },
+        bin_step: resolvedBinStep,
+        volatility,
+        fee_tvl_ratio,
+        organic_score,
+        amount_sol: 0, // will update after liquidity is added
+        amount_x: 0,
+        active_bin: activeBin.binId,
+        initial_value_usd: 0,
+        study_avg_hold_hours,
       });
-      const addTxArray = Array.isArray(addTxs) ? addTxs : [addTxs];
-      for (let i = 0; i < addTxArray.length; i++) {
-        const txHash = await sendAndConfirmTransaction(getConnection(), addTxArray[i], [wallet], { skipPreflight: true });
-        txHashes.push(txHash);
-        log("deploy", `Add liquidity tx ${i + 1}/${addTxArray.length}: ${txHash}`);
+      log("deploy", `Pre-tracked position ${posAddr.slice(0, 8)} (wide-range: liquidity pending)`);
+
+      // Phase 2: Add liquidity (may be multiple txs)
+      try {
+        const addTxs = await pool.addLiquidityByStrategyChunkable({
+          positionPubKey: newPosition.publicKey,
+          user: wallet.publicKey,
+          totalXAmount: totalXLamports,
+          totalYAmount: totalYLamports,
+          strategy: { minBinId, maxBinId, strategyType },
+          slippage: 10, // 10%
+        });
+        const addTxArray = Array.isArray(addTxs) ? addTxs : [addTxs];
+        for (let i = 0; i < addTxArray.length; i++) {
+          const txHash = await sendAndConfirmTransaction(getConnection(), addTxArray[i], [wallet], { skipPreflight: true });
+          txHashes.push(txHash);
+          log("deploy", `Add liquidity tx ${i + 1}/${addTxArray.length}: ${txHash}`);
+        }
+      } catch (liqErr) {
+        // Liquidity add failed — position exists on-chain but is empty.
+        // Mark it as closed so it doesn't count toward maxPositions or get managed.
+        log("deploy_error", `Phase 2 (add liquidity) failed for ${posAddr.slice(0, 8)}: ${liqErr.message}`);
+        recordClose(posAddr, "deploy failed (liquidity add error)");
+        return {
+          success: false,
+          error: `Position created on-chain but liquidity add failed: ${liqErr.message}. Empty position ${posAddr.slice(0, 8)} marked closed.`,
+          position: posAddr,
+          txs: txHashes,
+        };
       }
     } else {
       // ── Standard Path (<=69 bins) ─────────────────────────────────
