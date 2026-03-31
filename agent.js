@@ -88,25 +88,53 @@ async function codexAgentLoop(goal, maxSteps, systemPrompt) {
   const model = config.llm.codexModel || "gpt-5.4";
   log("agent", `Codex screening via CLI (model: ${model})`);
 
-  // ─── Step 1: Pre-fetch screening data in-process ───────────
+  // ─── Step 1: Pre-fetch ALL screening data in-process ───────
   const candidates = await getTopCandidates({ limit: 5 });
   if (!candidates?.candidates?.length) {
     return { content: "No eligible candidates found this cycle.", userMessage: goal };
   }
 
-  // Study top LPers for the best candidate
-  const top = candidates.candidates[0];
-  const [study, tokenInfo] = await Promise.all([
-    studyTopLPers({ pool_address: top.pool_address }).catch(() => null),
-    getTokenInfo({ mint: top.base_mint }).catch(() => null),
-  ]);
+  // Enrich ALL candidates with the same data the cron path uses
+  const { checkSmartWalletsOnPool } = await import("./tools/smart-wallets.js");
+  const { getTokenHolders, getTokenNarrative } = await import("./tools/token.js");
+  const { fetchOkxPriceInfo } = await import("./tools/okx.js");
+  const { recallForPool } = await import("./pool-memory.js");
+
+  const enriched = await Promise.all(candidates.candidates.map(async (c) => {
+    const [study, sw, holders, narrative, poolMem, tokenInfo, okxData] = await Promise.allSettled([
+      studyTopLPers({ pool_address: c.pool }).catch(() => null),
+      checkSmartWalletsOnPool({ pool_address: c.pool }),
+      c.base_mint ? getTokenHolders({ mint: c.base_mint }) : null,
+      c.base_mint ? getTokenNarrative({ mint: c.base_mint }) : null,
+      recallForPool(c.pool),
+      getTokenInfo({ mint: c.base_mint }).catch(() => null),
+      c.base_mint ? fetchOkxPriceInfo(c.base_mint) : null,
+    ]);
+
+    const data = { ...c };
+    const val = (r) => r.status === "fulfilled" ? r.value : null;
+    if (val(study)) data._study = val(study);
+    if (val(sw)?.found?.length > 0) data._smart_wallets = val(sw).found.length;
+    else data._smart_wallets = 0;
+    const h = val(holders);
+    if (h) {
+      data._global_fees_sol = h.global_fees_sol;
+      data._top_10_real_holders_pct = h.top_10_real_holders_pct;
+      data._bundlers_pct = h.bundlers_pct;
+    }
+    if (val(narrative)?.narrative) data._narrative = val(narrative).narrative.slice(0, 300);
+    if (val(poolMem)) data._pool_memory = val(poolMem);
+    if (val(tokenInfo)) data._token_info = val(tokenInfo);
+    const okx = val(okxData);
+    if (okx) {
+      data._ath_proximity_pct = okx.ath_proximity_pct;
+      data._momentum = { change_5m: okx.change_5m, change_1h: okx.change_1h, change_4h: okx.change_4h };
+    }
+    return data;
+  }));
 
   // ─── Step 2: Build Codex prompt with pre-fetched data ──────
-  const dataBlock = [
-    `CANDIDATES:\n${JSON.stringify(candidates.candidates, null, 2)}`,
-    study ? `\nTOP LPER STUDY (${top.name}):\n${JSON.stringify(study, null, 2)}` : "",
-    tokenInfo ? `\nTOKEN INFO (${top.name}):\n${JSON.stringify(tokenInfo, null, 2)}` : "",
-  ].join("\n");
+  const dataBlock = `CANDIDATES (fully enriched — all safety fields included):\n${JSON.stringify(enriched, null, 2)}`;
 
   // Strip tool-call instructions from prompt — Codex can't call our tools,
   // data is already pre-fetched above. This prevents Codex from trying to
