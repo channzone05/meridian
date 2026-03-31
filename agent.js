@@ -149,30 +149,32 @@ If no candidate is suitable, respond with:
 function runCodexExec(model, prompt) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    const codexBin = process.env.CODEX_PATH || "/c/Users/fciaf/AppData/Roaming/npm/codex";
+    const fs = require("fs");
+    const os = require("os");
+    const path = require("path");
 
-    const child = spawn(codexBin, [
-      "exec",
-      "--model", model,
-      "-c", "model_reasoning_effort=\"high\"",
-      "--full-auto",
-      "--skip-git-repo-check",
-      "-C", process.cwd(),
-      "-",  // read prompt from stdin
-    ], {
+    // Write prompt to temp file to avoid ENAMETOOLONG
+    // (Windows shell:true concatenates args, exceeding OS limits)
+    const tmpFile = path.join(os.tmpdir(), `meridian-codex-${Date.now()}.txt`);
+    fs.writeFileSync(tmpFile, prompt, "utf8");
+
+    // Use shell command that reads prompt from file via stdin redirection
+    const codexBin = process.env.CODEX_PATH || "codex";
+    const cmd = `"${codexBin}" exec --model ${model} -c model_reasoning_effort="high" --full-auto --skip-git-repo-check --json -C "${process.cwd()}" - < "${tmpFile.replace(/\\/g, "/")}"`;
+
+    const child = spawn("bash", ["-c", cmd], {
       timeout: 180000,
       env: { ...process.env },
-      shell: true,
+      windowsHide: true,
     });
-
-    // Pipe the prompt via stdin
-    child.stdin.write(prompt);
-    child.stdin.end();
 
     child.stdout.on("data", (data) => chunks.push(data.toString()));
     child.stderr.on("data", (data) => log("codex", data.toString().trim()));
 
     child.on("close", (code) => {
+      // Clean up temp file
+      try { fs.unlinkSync(tmpFile); } catch { /* best-effort */ }
+
       const output = chunks.join("");
       if (code !== 0 && !output) {
         reject(new Error(`Codex CLI exited with code ${code}`));
