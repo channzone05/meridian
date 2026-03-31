@@ -1,7 +1,4 @@
-import { spawn } from "child_process";
-import fs from "fs";
-import os from "os";
-import path from "path";
+import { spawn, spawnSync } from "child_process";
 import OpenAI from "openai";
 import { buildSystemPrompt } from "./prompt.js";
 import { executeTool } from "./tools/executor.js";
@@ -69,7 +66,19 @@ async function codexAgentLoop(goal, maxSteps, systemPrompt) {
     tokenInfo ? `\nTOKEN INFO (${top.name}):\n${JSON.stringify(tokenInfo, null, 2)}` : "",
   ].join("\n");
 
-  const decisionPrompt = `${systemPrompt}
+  // Strip tool-call instructions from prompt — Codex can't call our tools,
+  // data is already pre-fetched above. This prevents Codex from trying to
+  // execute tool calls via shell and hanging.
+  const analysisPrompt = systemPrompt
+    .replace(/Call\s+(get_top_candidates|study_top_lpers|get_pool_detail|get_pool_memory|check_smart_wallets_on_pool|get_token_holders|get_token_narrative|deploy_position|get_active_bin|get_wallet_balance|update_config|close_position|swap_token|claim_fees|get_position_pnl|set_position_note|remember_fact|recall_memory|forget_fact|get_my_positions|discover_pools|add_lesson|self_update)[^.]*\./gi, "")
+    .replace(/\b(SCREEN|STUDY|DEPLOY|MEMORY):\s*Use\s+\w+/g, "")
+    .replace(/You have access to these tools[\s\S]*?(?=\n\n)/g, "")
+    .replace(/Available tools[\s\S]*?(?=\n\n)/g, "");
+
+  const decisionPrompt = `${analysisPrompt}
+
+YOU ARE IN ANALYSIS-ONLY MODE. You CANNOT call any tools or run any commands.
+All data has been pre-fetched for you below. Analyze it and respond with JSON only.
 
 ${dataBlock}
 
@@ -77,7 +86,7 @@ ${dataBlock}
 TASK:
 ${goal}
 
-IMPORTANT: You must respond with a JSON deployment plan. If you recommend deploying, respond with ONLY a JSON block like:
+IMPORTANT: You must respond with a JSON deployment plan. Do NOT try to call any tools or run any commands. If you recommend deploying, respond with ONLY a JSON block like:
 \`\`\`json
 {
   "action": "deploy",
@@ -149,71 +158,136 @@ If no candidate is suitable, respond with:
  * Spawn `codex exec` and return its text output.
  * Pipes prompt via stdin (using "-") to avoid ENAMETOOLONG on large prompts.
  */
+function findExecutableOnPath(binName) {
+  const lookup = process.platform === "win32" ? "where.exe" : "which";
+  const result = spawnSync(lookup, [binName], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  if (result.status !== 0) return null;
+  return result.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean) || null;
+}
+
+function resolveCodexLaunch() {
+  const configured = process.env.CODEX_PATH?.trim();
+  if (configured) {
+    return {
+      command: configured,
+      shell: process.platform === "win32" && /\.(cmd|bat|ps1)$/i.test(configured),
+    };
+  }
+
+  if (process.platform === "win32") {
+    const codexExe = findExecutableOnPath("codex.exe");
+    if (codexExe) return { command: codexExe, shell: false };
+
+    const codexCmd = findExecutableOnPath("codex.cmd");
+    if (codexCmd) return { command: codexCmd, shell: true };
+  }
+
+  return { command: "codex", shell: false };
+}
+
+function killChildProcess(child) {
+  if (!child?.pid) return;
+
+  if (process.platform === "win32") {
+    try {
+      spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true });
+      return;
+    } catch {
+      // Fall through to best-effort child kill.
+    }
+  }
+
+  try {
+    child.kill("SIGKILL");
+  } catch {
+    // Best-effort cleanup only.
+  }
+}
+
 function runCodexExec(model, prompt) {
   return new Promise((resolve, reject) => {
-    const chunks = [];
+    const stdoutChunks = [];
+    const stderrChunks = [];
+    const { command, shell } = resolveCodexLaunch();
+    const args = [
+      "exec",
+      "--model",
+      model,
+      "-c",
+      "model_reasoning_effort=high",
+      "--skip-git-repo-check",
+      "--json",
+      "-C",
+      process.cwd(),
+      "-",
+    ];
 
-    // Write prompt to temp file to avoid ENAMETOOLONG
-    // (Windows shell:true concatenates args, exceeding OS limits)
-    const tmpFile = path.join(os.tmpdir(), `meridian-codex-${Date.now()}.txt`);
-    fs.writeFileSync(tmpFile, prompt, "utf8");
-
-    // Use shell command that reads prompt from file via stdin redirection
-    const codexBin = process.env.CODEX_PATH || "codex";
-    const cmd = `"${codexBin}" exec --model ${model} -c model_reasoning_effort="high" --full-auto --skip-git-repo-check --json -C "${process.cwd()}" - < "${tmpFile.replace(/\\/g, "/")}"`;
-
-    const child = spawn("bash", ["-c", cmd], {
+    const child = spawn(command, args, {
       env: { ...process.env },
       windowsHide: true,
+      shell,
     });
+
+    child.stdin.end(prompt, "utf8");
 
     // Manual kill timer — spawn timeout doesn't work reliably on Windows
     const TIMEOUT_MS = 180000;
     let killed = false;
     const killTimer = setTimeout(() => {
       killed = true;
-      try { child.kill("SIGKILL"); } catch { /* best-effort */ }
-      // Also kill any orphaned codex processes
-      try { spawn("bash", ["-c", "pkill -f 'codex exec'"], { windowsHide: true }); } catch { /* best-effort */ }
+      killChildProcess(child);
       reject(new Error(`Codex CLI timed out after ${TIMEOUT_MS / 1000}s`));
     }, TIMEOUT_MS);
 
-    child.stdout.on("data", (data) => chunks.push(data.toString()));
-    child.stderr.on("data", (data) => log("codex", data.toString().trim()));
+    child.stdout.on("data", (data) => stdoutChunks.push(data.toString()));
+    child.stderr.on("data", (data) => {
+      const text = data.toString();
+      stderrChunks.push(text);
+      const trimmed = text.trim();
+      if (trimmed) log("codex", trimmed);
+    });
 
     child.on("close", (code) => {
       clearTimeout(killTimer);
-      if (killed) return; // already rejected via timeout
-      // Clean up temp file
-      try { fs.unlinkSync(tmpFile); } catch { /* best-effort */ }
+      if (killed) return;
 
-      const output = chunks.join("");
-      if (code !== 0 && !output) {
-        reject(new Error(`Codex CLI exited with code ${code}`));
-        return;
-      }
-      // Try to extract the last assistant message from JSONL output
-      try {
-        const lines = output.trim().split("\n").filter(Boolean);
-        for (let i = lines.length - 1; i >= 0; i--) {
+      const output = stdoutChunks.join("");
+      const stderr = stderrChunks.join("").trim();
+      const lines = output.trim().split(/\r?\n/).filter(Boolean);
+      let lastStructuredError = "";
+      for (let i = lines.length - 1; i >= 0; i--) {
+        try {
           const event = JSON.parse(lines[i]);
-          // Codex JSONL format: {"type":"item.completed","item":{"type":"agent_message","text":"..."}}
           if (event.type === "item.completed" && event.item?.type === "agent_message" && event.item?.text) {
             resolve(event.item.text);
             return;
           }
-          // Legacy format fallback
           if (event.type === "message" && event.role === "assistant" && event.content) {
             resolve(typeof event.content === "string"
               ? event.content
-              : event.content.map(c => c.text || "").join("\n"));
+              : event.content.map((c) => c.text || "").join("\n"));
             return;
           }
+          if (!lastStructuredError && event.type === "item.completed" && event.item?.type === "error" && event.item?.message) {
+            lastStructuredError = event.item.message;
+          }
+        } catch {
+          // Ignore non-JSON lines and keep scanning.
         }
-      } catch {
-        // Not JSON — use raw output
       }
-      resolve(output);
+
+      if (code !== 0) {
+        reject(new Error(stderr || lastStructuredError || `Codex CLI exited with code ${code}`));
+        return;
+      }
+
+      resolve(output || stderr || "");
     });
 
     child.on("error", (err) => reject(err));
@@ -446,3 +520,4 @@ export async function lightChat(goal, sessionHistory = [], model = null) {
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
