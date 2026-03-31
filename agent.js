@@ -163,15 +163,27 @@ function runCodexExec(model, prompt) {
     const cmd = `"${codexBin}" exec --model ${model} -c model_reasoning_effort="high" --full-auto --skip-git-repo-check --json -C "${process.cwd()}" - < "${tmpFile.replace(/\\/g, "/")}"`;
 
     const child = spawn("bash", ["-c", cmd], {
-      timeout: 180000,
       env: { ...process.env },
       windowsHide: true,
     });
+
+    // Manual kill timer — spawn timeout doesn't work reliably on Windows
+    const TIMEOUT_MS = 180000;
+    let killed = false;
+    const killTimer = setTimeout(() => {
+      killed = true;
+      try { child.kill("SIGKILL"); } catch { /* best-effort */ }
+      // Also kill any orphaned codex processes
+      try { spawn("bash", ["-c", "pkill -f 'codex exec'"], { windowsHide: true }); } catch { /* best-effort */ }
+      reject(new Error(`Codex CLI timed out after ${TIMEOUT_MS / 1000}s`));
+    }, TIMEOUT_MS);
 
     child.stdout.on("data", (data) => chunks.push(data.toString()));
     child.stderr.on("data", (data) => log("codex", data.toString().trim()));
 
     child.on("close", (code) => {
+      clearTimeout(killTimer);
+      if (killed) return; // already rejected via timeout
       // Clean up temp file
       try { fs.unlinkSync(tmpFile); } catch { /* best-effort */ }
 
