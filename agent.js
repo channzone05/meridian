@@ -183,6 +183,12 @@ function runCodexExec(model, prompt) {
         const lines = output.trim().split("\n").filter(Boolean);
         for (let i = lines.length - 1; i >= 0; i--) {
           const event = JSON.parse(lines[i]);
+          // Codex JSONL format: {"type":"item.completed","item":{"type":"agent_message","text":"..."}}
+          if (event.type === "item.completed" && event.item?.type === "agent_message" && event.item?.text) {
+            resolve(event.item.text);
+            return;
+          }
+          // Legacy format fallback
           if (event.type === "message" && event.role === "assistant" && event.content) {
             resolve(typeof event.content === "string"
               ? event.content
