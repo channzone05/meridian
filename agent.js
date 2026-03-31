@@ -101,14 +101,15 @@ async function codexAgentLoop(goal, maxSteps, systemPrompt) {
   const { recallForPool } = await import("./pool-memory.js");
 
   const enriched = await Promise.all(candidates.candidates.map(async (c) => {
+    const mint = c.base_mint || c.base?.mint;
     const [study, sw, holders, narrative, poolMem, tokenInfo, okxData] = await Promise.allSettled([
       studyTopLPers({ pool_address: c.pool }).catch(() => null),
       checkSmartWalletsOnPool({ pool_address: c.pool }),
-      c.base_mint ? getTokenHolders({ mint: c.base_mint }) : null,
-      c.base_mint ? getTokenNarrative({ mint: c.base_mint }) : null,
+      mint ? getTokenHolders({ mint }) : null,
+      mint ? getTokenNarrative({ mint }) : null,
       recallForPool(c.pool),
-      getTokenInfo({ mint: c.base_mint }).catch(() => null),
-      c.base_mint ? fetchOkxPriceInfo(c.base_mint) : null,
+      mint ? getTokenInfo({ mint }).catch(() => null) : null,
+      mint ? fetchOkxPriceInfo(mint) : null,
     ]);
 
     const data = { ...c };
