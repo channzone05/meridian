@@ -317,7 +317,8 @@ Example: "AVOID: Entering NOTHING-SOL during 4h +70% pump — reversal risk is h
 
     setScreeningBusy(true);
     timers.screeningLastRun = Date.now();
-    log("cron", `Starting screening cycle [model: ${config.llm.screeningModel}]`);
+    const screenModel = config.llm.codexScreening ? `codex/${config.llm.codexModel}` : config.llm.screeningModel;
+    log("cron", `Starting screening cycle [model: ${screenModel}]`);
     let screenReport = null;
     try {
       // Compute dynamic deploy amount based on current wallet (compounding)
