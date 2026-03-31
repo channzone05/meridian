@@ -95,7 +95,7 @@ async function codexAgentLoop(goal, maxSteps, systemPrompt) {
   }
 
   // Enrich ALL candidates with the same data the cron path uses
-  const { checkSmartWalletsOnPool } = await import("./tools/smart-wallets.js");
+  const { checkSmartWalletsOnPool } = await import("./smart-wallets.js");
   const { getTokenHolders, getTokenNarrative } = await import("./tools/token.js");
   const { fetchOkxPriceInfo } = await import("./tools/okx.js");
   const { recallForPool } = await import("./pool-memory.js");
