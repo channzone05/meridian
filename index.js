@@ -630,6 +630,22 @@ if (runtimeMode.interactive) {
     finally { setBusy(false); rl.setPrompt(buildPrompt()); rl.resume(); rl.prompt(); }
   }
 
+  async function runScreeningBusy(fn) {
+    if (isBusy() || isScreeningBusy()) { console.log("Agent is busy, please wait..."); rl.prompt(); return; }
+    setBusy(true);
+    setScreeningBusy(true);
+    rl.pause();
+    try { await fn(); }
+    catch (e) { console.error(`Error: ${e.message}`); }
+    finally {
+      setScreeningBusy(false);
+      setBusy(false);
+      rl.setPrompt(buildPrompt());
+      rl.resume();
+      rl.prompt();
+    }
+  }
+
   // ── Startup: show wallet + top candidates ──
   console.log(`
 ╔═══════════════════════════════════════════╗
@@ -743,11 +759,13 @@ Commands:
     // ── Number pick: deploy into pool N ─────
     const pick = parseInt(input);
     if (!isNaN(pick) && pick >= 1 && pick <= startupCandidates.length) {
-      await runBusy(async () => {
+      await runScreeningBusy(async () => {
         const pool = startupCandidates[pick - 1];
-        console.log(`\nDeploying ${DEPLOY} SOL into ${pool.name}...\n`);
+        const currentBalance = await getWalletBalances().catch(() => null);
+        const deployAmount = currentBalance ? computeDeployAmount(currentBalance.sol) : DEPLOY;
+        console.log(`\nDeploying ${deployAmount} SOL into ${pool.name}...\n`);
         const { content: reply } = await screenerLoop(
-          `Deploy ${DEPLOY} SOL into pool ${pool.pool} (${pool.name}). Call get_active_bin first then deploy_position. Report result.`,
+          `Deploy ${deployAmount} SOL into pool ${pool.pool} (${pool.name}). Call get_active_bin first then deploy_position. Report result.`,
           config.llm.maxSteps
         );
         console.log(`\n${reply}\n`);
@@ -758,10 +776,12 @@ Commands:
 
     // ── auto: agent picks and deploys ───────
     if (input.toLowerCase() === "auto") {
-      await runBusy(async () => {
+      await runScreeningBusy(async () => {
         console.log("\nAgent is picking and deploying...\n");
+        const currentBalance = await getWalletBalances().catch(() => null);
+        const deployAmount = currentBalance ? computeDeployAmount(currentBalance.sol) : DEPLOY;
         const { content: reply } = await screenerLoop(
-          `get_top_candidates, pick the best one, get_active_bin, deploy_position with ${DEPLOY} SOL. Execute now, don't ask.`,
+          `get_top_candidates, pick the best one, get_active_bin, deploy_position with ${deployAmount} SOL. Execute now, don't ask.`,
           config.llm.maxSteps
         );
         console.log(`\n${reply}\n`);
@@ -930,9 +950,11 @@ Focus on: hold duration, entry/exit timing, what win rates look like, whether sc
   maybeRunMissedBriefing().catch(() => {});
   if (runtimeMode.runStartupCheck) (async () => {
     try {
+      const currentBalance = await getWalletBalances().catch(() => null);
+      const deployAmount = currentBalance ? computeDeployAmount(currentBalance.sol) : DEPLOY;
       await screenerLoop(`
 STARTUP CHECK
-1. get_wallet_balance. 2. get_my_positions. 3. If SOL >= ${config.management.minSolToOpen}: get_top_candidates then deploy ${DEPLOY} SOL. 4. Report.
+1. get_wallet_balance. 2. get_my_positions. 3. If SOL >= ${config.management.minSolToOpen}: get_top_candidates then deploy ${deployAmount} SOL. 4. Report.
       `, config.llm.maxSteps, []);
     } catch (e) {
       log("startup_error", e.message);
