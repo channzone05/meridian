@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "child_process";
+import { existsSync } from "fs";
 import OpenAI from "openai";
 import { fileURLToPath } from "url";
 import { buildSystemPrompt } from "./prompt.js";
@@ -43,7 +44,32 @@ export function getScreenerModelLabel() {
 }
 
 export async function screenerLoop(goal, maxSteps = config.llm.maxSteps, sessionHistory = []) {
-  return agentLoop(goal, maxSteps, sessionHistory, "SCREENER", getScreenerModelLabel());
+  return agentLoop(goal, maxSteps, sessionHistory, "SCREENER", config.llm.screeningModel);
+}
+
+function getRolePrimaryModel(agentType) {
+  if (agentType === "SCREENER") return config.llm.screeningModel;
+  if (agentType === "MANAGER") return config.llm.managementModel;
+  return config.llm.generalModel;
+}
+
+function getRoleFallbackModel(agentType, primaryModel) {
+  const configuredFallback = agentType === "SCREENER"
+    ? config.llm.screeningFallbackModel
+    : agentType === "MANAGER"
+      ? config.llm.managementFallbackModel
+      : config.llm.generalFallbackModel;
+
+  if (configuredFallback && configuredFallback !== primaryModel) {
+    return configuredFallback;
+  }
+
+  const rolePrimary = getRolePrimaryModel(agentType);
+  if (rolePrimary && rolePrimary !== primaryModel) {
+    return rolePrimary;
+  }
+
+  return null;
 }
 
 /**
@@ -207,21 +233,40 @@ function findExecutableOnPath(binName) {
 function resolveCodexLaunch() {
   const configured = process.env.CODEX_PATH?.trim();
   if (configured) {
+    if (process.platform === "win32") {
+      if (/\.exe$/i.test(configured)) {
+        return { command: configured };
+      }
+
+      const siblingExe = configured.replace(/\.(cmd|bat|ps1)$/i, ".exe");
+      if (siblingExe !== configured && existsSync(siblingExe)) {
+        return { command: siblingExe };
+      }
+
+      const codexExe = findExecutableOnPath("codex.exe");
+      if (codexExe) return { command: codexExe };
+    }
+
     return {
       command: configured,
-      shell: process.platform === "win32" && /\.(cmd|bat|ps1)$/i.test(configured),
     };
   }
 
   if (process.platform === "win32") {
     const codexExe = findExecutableOnPath("codex.exe");
-    if (codexExe) return { command: codexExe, shell: false };
+    if (codexExe) return { command: codexExe };
+
+    const codexAny = findExecutableOnPath("codex");
+    if (codexAny && /\.exe$/i.test(codexAny)) return { command: codexAny };
 
     const codexCmd = findExecutableOnPath("codex.cmd");
-    if (codexCmd) return { command: codexCmd, shell: true };
+    if (codexCmd) {
+      const siblingExe = codexCmd.replace(/\.cmd$/i, ".exe");
+      if (siblingExe !== codexCmd && existsSync(siblingExe)) return { command: siblingExe };
+    }
   }
 
-  return { command: "codex", shell: false };
+  return { command: "codex" };
 }
 
 function killChildProcess(child) {
@@ -247,7 +292,7 @@ function runCodexExec(model, prompt) {
   return new Promise((resolve, reject) => {
     const stdoutChunks = [];
     const stderrChunks = [];
-    const { command, shell } = resolveCodexLaunch();
+    const { command } = resolveCodexLaunch();
     const args = [
       "exec",
       "--model",
@@ -260,15 +305,13 @@ function runCodexExec(model, prompt) {
       "model_reasoning_effort=high",
       "--skip-git-repo-check",
       "--json",
-      "-C",
-      process.cwd(),
       "-",
     ];
 
     const child = spawn(command, args, {
       env: { ...process.env },
       windowsHide: true,
-      shell,
+      cwd: process.cwd(),
     });
 
     child.stdin.end(prompt, "utf8");
@@ -355,7 +398,7 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
     try {
       return await codexAgentLoop(goal, maxSteps, systemPrompt);
     } catch (err) {
-      log("agent", `Codex CLI failed (${err.message}), falling back to OpenRouter`);
+      log("agent", `Codex CLI failed (${err.message}), falling back to screening model ${config.llm.screeningModel}`);
     }
   }
 
@@ -384,10 +427,10 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
     log("agent", `Step ${step + 1}/${maxSteps}`);
 
     try {
-      const activeModel = model || DEFAULT_MODEL;
+      const activeModel = model || getRolePrimaryModel(agentType) || DEFAULT_MODEL;
+      const fallbackModel = getRoleFallbackModel(agentType, activeModel);
 
-      // Retry up to 3 times on transient errors; fallback model on 2nd failure
-      const FALLBACK_MODEL = "deepseek/deepseek-v3.2-speciale";
+      // Retry up to 3 times on transient errors; optional configured fallback on 2nd failure
       const RETRYABLE = new Set([402, 408, 429, 502, 503, 504, 529]);
       let response;
       let usedModel = activeModel;
@@ -411,10 +454,10 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
         } catch (apiErr) {
           const status = apiErr.status || apiErr.statusCode;
           if (!RETRYABLE.has(status)) throw apiErr;
-          // On 2nd failure, switch to fallback model
-          if (attempt >= 1 && usedModel !== FALLBACK_MODEL) {
-            usedModel = FALLBACK_MODEL;
-            log("agent", `Primary model failed (${status}), switching to fallback ${FALLBACK_MODEL}`);
+          // On 2nd failure, switch to configured fallback if one exists.
+          if (attempt >= 1 && fallbackModel && usedModel !== fallbackModel) {
+            usedModel = fallbackModel;
+            log("agent", `Primary model failed (${status}), switching to fallback ${fallbackModel}`);
           } else {
             const wait = (attempt + 1) * 5000;
             log("agent", `Provider error ${status}, retrying in ${wait / 1000}s (attempt ${attempt + 1}/3)`);
@@ -522,8 +565,9 @@ export async function lightChat(goal, sessionHistory = [], model = null) {
     { role: "user", content: goal },
   ];
 
-  const FALLBACK_MODEL = "deepseek/deepseek-v3.2-speciale";
-  const modelsToTry = [model || DEFAULT_MODEL, FALLBACK_MODEL];
+  const primaryModel = model || getRolePrimaryModel("GENERAL") || DEFAULT_MODEL;
+  const fallbackModel = getRoleFallbackModel("GENERAL", primaryModel);
+  const modelsToTry = fallbackModel ? [primaryModel, fallbackModel] : [primaryModel];
 
   for (const tryModel of modelsToTry) {
     try {
@@ -544,8 +588,8 @@ export async function lightChat(goal, sessionHistory = [], model = null) {
       return { content, userMessage: goal };
     } catch (e) {
       const status = e.status || e.statusCode;
-      if (tryModel !== FALLBACK_MODEL && (status === 402 || status === 429 || status === 502 || status === 503 || status === 504 || status === 529)) {
-        log("agent", `Light chat primary failed (${status}), trying fallback ${FALLBACK_MODEL}`);
+      if (fallbackModel && tryModel !== fallbackModel && (status === 402 || status === 429 || status === 502 || status === 503 || status === 504 || status === 529)) {
+        log("agent", `Light chat primary failed (${status}), trying fallback ${fallbackModel}`);
         continue;
       }
       log("agent", `Light chat failed (${e.message}), falling back to full agent loop`);

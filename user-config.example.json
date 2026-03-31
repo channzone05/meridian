@@ -14,6 +14,10 @@
   "managementModel": "deepseek-chat",
   "screeningModel": "deepseek-reasoner",
   "generalModel": "deepseek-chat",
+  "codexPath": "C:\\path\\to\\codex.exe",
+  "managementFallbackModel": null,
+  "screeningFallbackModel": null,
+  "generalFallbackModel": null,
 
   "codexScreening": false,
   "codexModel": "gpt-5.4",

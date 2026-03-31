@@ -14,6 +14,7 @@ const u = fs.existsSync(USER_CONFIG_PATH)
 if (u.rpcUrl)    process.env.RPC_URL            ||= u.rpcUrl;
 if (u.walletKey) process.env.WALLET_PRIVATE_KEY ||= u.walletKey;
 if (u.llmModel)  process.env.LLM_MODEL          ||= u.llmModel;
+if (u.codexPath) process.env.CODEX_PATH         ||= u.codexPath;
 if (u.dryRun !== undefined) process.env.DRY_RUN ||= String(u.dryRun);
 
 export const config = {
@@ -88,6 +89,9 @@ export const config = {
     managementModel: u.managementModel ?? process.env.LLM_MODEL ?? "openai/gpt-5.4-nano",
     screeningModel:  u.screeningModel  ?? process.env.LLM_MODEL ?? "openai/gpt-5.4-nano",
     generalModel:    u.generalModel    ?? process.env.LLM_MODEL ?? "openai/gpt-5.4-nano",
+    managementFallbackModel: u.managementFallbackModel ?? null,
+    screeningFallbackModel:  u.screeningFallbackModel  ?? null,
+    generalFallbackModel:    u.generalFallbackModel    ?? null,
     codexScreening: u.codexScreening ?? false,
     codexModel: u.codexModel ?? "gpt-5.4",
   },
