@@ -121,6 +121,66 @@ export async function deployPosition({
     throw new Error("Only 'bid_ask' or 'spot' strategies are allowed.");
   }
 
+  // ─── Hard guard: two-sided spot requires ALL 4 conditions ──────
+  const isTwoSidedSpot = activeStrategy === "spot" && sol_split_pct != null && sol_split_pct < 100;
+  if (isTwoSidedSpot) {
+    const failures = [];
+
+    // Condition 1: Smart wallets must be present on this pool
+    let hasSmartWallets = false;
+    try {
+      const { checkSmartWalletsOnPool } = await import("../smart-wallets.js");
+      const swResult = await checkSmartWalletsOnPool({ pool_address });
+      hasSmartWallets = swResult?.found?.length > 0;
+    } catch { /* default to false */ }
+    if (!hasSmartWallets) failures.push("no smart wallets on pool");
+
+    // Condition 2: Top LPers >= 80% win rate using spot
+    let studyPasses = false;
+    try {
+      const studyResult = await studyTopLPers({ pool_address, limit: 4 });
+      const credible = (studyResult?.lpers || []).filter(lp => lp.total_lp >= 3 && lp.win_rate >= 0.6 && lp.total_inflow >= 1000);
+      const avgWR = credible.length > 0 ? credible.reduce((s, lp) => s + lp.win_rate, 0) / credible.length : 0;
+      studyPasses = avgWR >= 0.80;
+    } catch { /* default to false */ }
+    if (!studyPasses) failures.push("top LPers < 80% win rate");
+
+    // Condition 3: Price must be stabilizing (not pumping >10% in 1h)
+    let priceStable = false;
+    try {
+      const { fetchOkxPriceInfo } = await import("../tools/okx.js");
+      const resolvedMint = base_mint || (await (async () => {
+        const pool = await getPool(pool_address);
+        return pool.lbPair.tokenXMint.toBase58();
+      })());
+      const okx = await fetchOkxPriceInfo(resolvedMint);
+      priceStable = okx && Math.abs(okx.change_1h || 0) <= 10;
+    } catch { priceStable = true; /* if OKX unavailable, don't block on this alone */ }
+    if (!priceStable) failures.push("price pumping >10% in 1h");
+
+    // Condition 4: Pool memory shows prior spot profits
+    let memoryPasses = false;
+    try {
+      const { getPoolMemory } = await import("../pool-memory.js");
+      const mem = getPoolMemory(pool_address);
+      if (mem && mem.deploys?.length > 0) {
+        const spotDeploys = mem.deploys.filter(d => d.strategy === "spot");
+        const spotWins = spotDeploys.filter(d => (d.pnl_pct || 0) > 0);
+        memoryPasses = spotDeploys.length > 0 && spotWins.length / spotDeploys.length > 0.5;
+      }
+    } catch { /* default to false */ }
+    if (!memoryPasses) failures.push("no prior profitable spot deploys in pool memory");
+
+    if (failures.length > 0) {
+      log("deploy", `BLOCKED two-sided spot: ${failures.join(", ")}`);
+      return {
+        success: false,
+        error: `Two-sided spot blocked — failed ${failures.length}/4 hard conditions: ${failures.join("; ")}. Use bid_ask instead.`,
+      };
+    }
+    log("deploy", `Two-sided spot approved: all 4 conditions met (smart wallets, study WR >= 80%, price stable, pool memory positive)`);
+  }
+
   // ─── Hard guard: no duplicate pool/token deployments ────────────
   {
     const { getTrackedPositions } = await import("../state.js");
