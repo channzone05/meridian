@@ -1,4 +1,7 @@
 import { spawn } from "child_process";
+import fs from "fs";
+import os from "os";
+import path from "path";
 import OpenAI from "openai";
 import { buildSystemPrompt } from "./prompt.js";
 import { executeTool } from "./tools/executor.js";
@@ -149,9 +152,6 @@ If no candidate is suitable, respond with:
 function runCodexExec(model, prompt) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    const fs = require("fs");
-    const os = require("os");
-    const path = require("path");
 
     // Write prompt to temp file to avoid ENAMETOOLONG
     // (Windows shell:true concatenates args, exceeding OS limits)
