@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from "child_process";
 import OpenAI from "openai";
+import { fileURLToPath } from "url";
 import { buildSystemPrompt } from "./prompt.js";
 import { executeTool } from "./tools/executor.js";
 import { tools } from "./tools/definitions.js";
@@ -29,6 +30,21 @@ const client = new OpenAI({
 });
 
 const DEFAULT_MODEL = process.env.LLM_MODEL || "openai/gpt-5.4-nano";
+const CODEX_SCREENING_SCHEMA_PATH = fileURLToPath(new URL("./tools/codex-screening-plan.schema.json", import.meta.url));
+
+export function isCodexScreenerEnabled() {
+  return Boolean(config.llm.codexScreening);
+}
+
+export function getScreenerModelLabel() {
+  return isCodexScreenerEnabled()
+    ? `codex/${config.llm.codexModel || "gpt-5.4"}`
+    : config.llm.screeningModel;
+}
+
+export async function screenerLoop(goal, maxSteps = config.llm.maxSteps, sessionHistory = []) {
+  return agentLoop(goal, maxSteps, sessionHistory, "SCREENER", getScreenerModelLabel());
+}
 
 /**
  * Codex CLI-based agent loop for screening.
@@ -102,7 +118,17 @@ IMPORTANT: You must respond with a JSON deployment plan. Do NOT try to call any 
 \`\`\`
 If no candidate is suitable, respond with:
 \`\`\`json
-{ "action": "skip", "reasoning": "<why>" }
+{
+  "action": "skip",
+  "pool_address": null,
+  "pool_name": null,
+  "base_mint": null,
+  "strategy": null,
+  "price_range_pct": null,
+  "amount_sol": null,
+  "sol_split_pct": null,
+  "reasoning": "<why>"
+}
 \`\`\``;
 
   // ─── Step 3: Send to Codex CLI ─────────────────────────────
@@ -131,6 +157,13 @@ If no candidate is suitable, respond with:
   }
 
   if (plan.action === "deploy") {
+    const requiredDeployFields = ["pool_address", "pool_name", "base_mint", "strategy", "price_range_pct", "amount_sol"];
+    const missingFields = requiredDeployFields.filter((field) => plan[field] == null);
+    if (missingFields.length) {
+      log("agent", `Codex deploy plan missing required fields: ${missingFields.join(", ")}`);
+      return { content: codexResponse, userMessage: goal };
+    }
+
     log("agent", `Codex recommends deploy: ${plan.pool_name} (${plan.strategy}, range ${plan.price_range_pct}%)`);
 
     const deployArgs = {
@@ -219,6 +252,10 @@ function runCodexExec(model, prompt) {
       "exec",
       "--model",
       model,
+      "--output-schema",
+      CODEX_SCREENING_SCHEMA_PATH,
+      "--sandbox",
+      "read-only",
       "-c",
       "model_reasoning_effort=high",
       "--skip-git-repo-check",
@@ -302,8 +339,8 @@ function runCodexExec(model, prompt) {
  * @returns {string} - The agent's final text response
  */
 export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHistory = [], agentType = "GENERAL", model = null) {
-  // Route to Codex CLI when codexScreening is enabled for SCREENER agent
-  if (config.llm.codexScreening && agentType === "SCREENER") {
+  // When enabled, Codex CLI fully replaces the normal screener model path.
+  if (isCodexScreenerEnabled() && agentType === "SCREENER") {
     const [portfolio, positions] = await Promise.all([getWalletBalances(), getMyPositions()]);
     const stateSummary = getStateSummary();
     const lessons = getLessonsForPrompt({ agentType });

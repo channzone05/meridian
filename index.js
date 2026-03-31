@@ -1,7 +1,7 @@
 import "dotenv/config";
 import cron from "node-cron";
 import readline from "readline";
-import { agentLoop, lightChat } from "./agent.js";
+import { agentLoop, lightChat, getScreenerModelLabel, screenerLoop } from "./agent.js";
 import { log } from "./logger.js";
 import { getMyPositions } from "./tools/dlmm.js";
 import { getWalletBalances } from "./tools/wallet.js";
@@ -317,7 +317,7 @@ Example: "AVOID: Entering NOTHING-SOL during 4h +70% pump — reversal risk is h
 
     setScreeningBusy(true);
     timers.screeningLastRun = Date.now();
-    const screenModel = config.llm.codexScreening ? `codex/${config.llm.codexModel}` : config.llm.screeningModel;
+    const screenModel = getScreenerModelLabel();
     log("cron", `Starting screening cycle [model: ${screenModel}]`);
     let screenReport = null;
     try {
@@ -487,7 +487,7 @@ ${activeStrategy ? `\nSAVED STRATEGY (reference, not mandatory): ${activeStrateg
         }
       } catch { /* best-effort */ }
 
-      const { content } = await agentLoop(`
+      const { content } = await screenerLoop(`
 SCREENING CYCLE — DEPLOY ONLY${memoryHints}${signalWeightsBlock}${candidateBlocks}
 ${strategyBlock}
 ${candidateBlocks ? `The candidates above are PRE-LOADED with smart wallet, holder, narrative, and memory data.
@@ -505,7 +505,7 @@ study_top_lpers is useful for strategy choice (bid_ask vs spot), hold times, and
 4. study_top_lpers → use for strategy choice, hold times, win rates. Do NOT use avg_range_pct for your range — size from the VOLATILITY TABLE instead.
 5. deploy_position with ${deployAmount} SOL and price_range_pct from volatility table (adjusted by lessons).`}
 ${getRangeSelectionText(deployAmount, currentBalance?.sol)}
-      `, config.llm.maxSteps, [], "SCREENER", config.llm.screeningModel);
+      `, config.llm.maxSteps, []);
       screenReport = content;
     } catch (error) {
       log("cron_error", `Screening cycle failed: ${error.message}`);
@@ -746,12 +746,9 @@ Commands:
       await runBusy(async () => {
         const pool = startupCandidates[pick - 1];
         console.log(`\nDeploying ${DEPLOY} SOL into ${pool.name}...\n`);
-        const { content: reply } = await agentLoop(
+        const { content: reply } = await screenerLoop(
           `Deploy ${DEPLOY} SOL into pool ${pool.pool} (${pool.name}). Call get_active_bin first then deploy_position. Report result.`,
-          config.llm.maxSteps,
-          [],
-          "SCREENER",
-          config.llm.screeningModel
+          config.llm.maxSteps
         );
         console.log(`\n${reply}\n`);
         launchCron({ announce: true });
@@ -763,12 +760,9 @@ Commands:
     if (input.toLowerCase() === "auto") {
       await runBusy(async () => {
         console.log("\nAgent is picking and deploying...\n");
-        const { content: reply } = await agentLoop(
+        const { content: reply } = await screenerLoop(
           `get_top_candidates, pick the best one, get_active_bin, deploy_position with ${DEPLOY} SOL. Execute now, don't ask.`,
-          config.llm.maxSteps,
-          [],
-          "SCREENER",
-          config.llm.screeningModel
+          config.llm.maxSteps
         );
         console.log(`\n${reply}\n`);
         launchCron({ announce: true });
@@ -936,10 +930,10 @@ Focus on: hold duration, entry/exit timing, what win rates look like, whether sc
   maybeRunMissedBriefing().catch(() => {});
   if (runtimeMode.runStartupCheck) (async () => {
     try {
-      await agentLoop(`
+      await screenerLoop(`
 STARTUP CHECK
 1. get_wallet_balance. 2. get_my_positions. 3. If SOL >= ${config.management.minSolToOpen}: get_top_candidates then deploy ${DEPLOY} SOL. 4. Report.
-      `, config.llm.maxSteps, [], "SCREENER", config.llm.screeningModel);
+      `, config.llm.maxSteps, []);
     } catch (e) {
       log("startup_error", e.message);
     }

@@ -19,7 +19,7 @@ import {
   isScreeningBusy,
 } from "./session.js";
 import { emit, on } from "./notifier.js";
-import { agentLoop, lightChat } from "./agent.js";
+import { agentLoop, lightChat, screenerLoop } from "./agent.js";
 import { getMyPositions } from "./tools/dlmm.js";
 import { getWalletBalances } from "./tools/wallet.js";
 import { getTopCandidates } from "./tools/screening.js";
@@ -470,9 +470,9 @@ export function startServer(timersFn) {
           try {
             const currentBalance = await getWalletBalances().catch(() => null);
             const deployAmount = currentBalance ? computeDeployAmount(currentBalance.sol) : config.management.deployAmountSol;
-            const { content } = await agentLoop(
+            const { content } = await screenerLoop(
               `get_top_candidates, pick the best one, get_active_bin, deploy_position with ${deployAmount} SOL. Execute now, don't ask.`,
-              config.llm.maxSteps, [], "SCREENER", config.llm.screeningModel,
+              config.llm.maxSteps, [],
             );
             appendHistory("auto", content);
             emit("chat:response", { text: content, ts: new Date().toISOString() });
@@ -500,9 +500,9 @@ export function startServer(timersFn) {
               const pool = candidates[pick - 1];
               const currentBalance = await getWalletBalances().catch(() => null);
               const deployAmount = currentBalance ? computeDeployAmount(currentBalance.sol) : config.management.deployAmountSol;
-              const { content } = await agentLoop(
+              const { content } = await screenerLoop(
                 `Deploy ${deployAmount} SOL into pool ${pool.pool} (${pool.name}). Call get_active_bin first then deploy_position. Report result.`,
-                config.llm.maxSteps, [], "SCREENER", config.llm.screeningModel,
+                config.llm.maxSteps, [],
               );
               appendHistory(`deploy #${pick} ${pool.name}`, content);
               emit("chat:response", { text: content, ts: new Date().toISOString() });
