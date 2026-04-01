@@ -137,7 +137,39 @@ async function applyPriorityFee(tx, feePayer, label) {
 async function sendManagedTransaction(tx, signers, label) {
   const feePayer = signers?.[0]?.publicKey;
   await applyPriorityFee(tx, feePayer, label);
-  return sendAndConfirmTransaction(getConnection(), tx, signers, { skipPreflight: true });
+  let lastError = null;
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      if (attempt > 0) {
+        const { blockhash } = await getConnection().getLatestBlockhash("confirmed");
+        tx.recentBlockhash = blockhash;
+        tx.feePayer ??= feePayer;
+      }
+
+      return await sendAndConfirmTransaction(getConnection(), tx, signers, {
+        skipPreflight: true,
+        preflightCommitment: "confirmed",
+        commitment: "confirmed",
+        maxRetries: 3,
+      });
+    } catch (error) {
+      lastError = error;
+      const message = error?.message || String(error);
+      const retryableExpiry =
+        /block height exceeded/i.test(message) ||
+        /blockhash not found/i.test(message) ||
+        /transaction expired/i.test(message);
+
+      if (!retryableExpiry || attempt === 2) {
+        throw error;
+      }
+
+      log("tx_retry", `${label}: ${message}; refreshing blockhash and retrying (${attempt + 2}/3)`);
+    }
+  }
+
+  throw lastError;
 }
 
 // ─── Pool Cache ────────────────────────────────────────────────

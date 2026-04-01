@@ -451,6 +451,7 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
     ...sessionHistory,          // inject prior conversation turns
     { role: "user", content: goal },
   ];
+  let consecutiveEmptyResponses = 0;
 
   for (let step = 0; step < maxSteps; step++) {
     log("agent", `Step ${step + 1}/${maxSteps}`);
@@ -508,14 +509,20 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
         // Hermes sometimes returns null content — pop the empty message and retry once
         if (!msg.content) {
           messages.pop(); // remove the empty assistant message
-          log("agent", "Empty response, retrying...");
+          consecutiveEmptyResponses += 1;
+          if (consecutiveEmptyResponses >= 3) {
+            throw new Error(`Model returned ${consecutiveEmptyResponses} empty responses in a row`);
+          }
+          log("agent", `Empty response, retrying (${consecutiveEmptyResponses}/3)...`);
           continue;
         }
+        consecutiveEmptyResponses = 0;
         log("agent", "Final answer reached");
         log("agent", msg.content);
         return { content: msg.content, userMessage: goal };
       }
 
+      consecutiveEmptyResponses = 0;
       // On-chain write operations must run sequentially to avoid blockhash
       // expiry from parallel Solana transactions competing for block space.
       // Read-only tools can still run in parallel for speed.
