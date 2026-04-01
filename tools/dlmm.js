@@ -225,7 +225,23 @@ export async function deployPosition({
   pool_address = normalizeMint(pool_address);
   const activeStrategy = strategy || config.strategy.strategy;
   let resolvedBinStep = bin_step;
-  const totalSolAmount = amount_y ?? amount_sol ?? 0;
+  let totalSolAmount = amount_y ?? amount_sol ?? 0;
+
+  // ─── Hard guard: enforce minimum deploy amount from computeDeployAmount ───
+  // Models sometimes ignore the prompt and pass tiny amounts (0.1, 0.2 SOL).
+  // Override with the computed amount based on wallet balance + positionSizePct.
+  try {
+    const { computeDeployAmount } = await import("../config.js");
+    const { getWalletBalances } = await import("./wallet.js");
+    const bal = await getWalletBalances();
+    if (bal?.sol > 0) {
+      const computed = computeDeployAmount(bal.sol);
+      if (totalSolAmount < computed * 0.5) {
+        log("deploy", `Amount ${totalSolAmount} SOL overridden to ${computed} SOL (model passed too little, computed from ${bal.sol} SOL wallet)`);
+        totalSolAmount = computed;
+      }
+    }
+  } catch { /* best-effort — use what the model passed */ }
 
   if (!["bid_ask", "spot"].includes(activeStrategy)) {
     throw new Error("Only 'bid_ask' or 'spot' strategies are allowed.");
