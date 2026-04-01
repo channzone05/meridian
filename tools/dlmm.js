@@ -1,5 +1,6 @@
 import {
   Connection,
+  ComputeBudgetProgram,
   Keypair,
   PublicKey,
   sendAndConfirmTransaction,
@@ -63,8 +64,85 @@ function getWallet() {
   return _wallet;
 }
 
+function getHeliusPriorityFeeRpcUrl() {
+  const heliusKey = process.env.HELIUS_API_KEY;
+  if (!heliusKey) return null;
+  return `https://mainnet.helius-rpc.com/?api-key=${heliusKey}`;
+}
+
+async function estimatePriorityFeeMicroLamports(tx, feePayer, label = "tx") {
+  const heliusUrl = getHeliusPriorityFeeRpcUrl();
+  if (!heliusUrl || !tx?.instructions?.length) return null;
+
+  try {
+    tx.feePayer ??= feePayer;
+    if (!tx.recentBlockhash) {
+      const { blockhash } = await getConnection().getLatestBlockhash("confirmed");
+      tx.recentBlockhash = blockhash;
+    }
+
+    const serializedTx = bs58.encode(tx.serialize({
+      requireAllSignatures: false,
+      verifySignatures: false,
+    }));
+
+    const res = await fetch(heliusUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: "1",
+        method: "getPriorityFeeEstimate",
+        params: [{
+          transaction: serializedTx,
+          options: {
+            priorityLevel: config.management.priorityFeeLevel || "Medium",
+            recommended: true,
+          },
+        }],
+      }),
+    });
+
+    if (!res.ok) {
+      throw new Error(`Helius fee estimate failed: ${res.status} ${res.statusText}`);
+    }
+
+    const data = await res.json();
+    const estimate = Math.ceil(Number(data?.result?.priorityFeeEstimate || 0));
+    if (!Number.isFinite(estimate) || estimate <= 0) return null;
+    log("priority_fee", `${label}: estimated ${estimate} microlamports/CU (${config.management.priorityFeeLevel})`);
+    return estimate;
+  } catch (error) {
+    log("priority_fee_warn", `${label}: ${error.message}`);
+    return null;
+  }
+}
+
+async function applyPriorityFee(tx, feePayer, label) {
+  if (!tx?.instructions?.length) return tx;
+
+  const microLamports = await estimatePriorityFeeMicroLamports(tx, feePayer, label);
+  if (!microLamports) return tx;
+
+  tx.instructions.unshift(
+    ComputeBudgetProgram.setComputeUnitPrice({ microLamports })
+  );
+
+  const { blockhash } = await getConnection().getLatestBlockhash("confirmed");
+  tx.recentBlockhash = blockhash;
+  tx.feePayer = feePayer;
+  return tx;
+}
+
+async function sendManagedTransaction(tx, signers, label) {
+  const feePayer = signers?.[0]?.publicKey;
+  await applyPriorityFee(tx, feePayer, label);
+  return sendAndConfirmTransaction(getConnection(), tx, signers, { skipPreflight: true });
+}
+
 // ─── Pool Cache ────────────────────────────────────────────────
 const poolCache = new Map();
+const closeInflight = new Map();
 
 async function getPool(poolAddress) {
   const key = poolAddress.toString();
@@ -439,7 +517,7 @@ export async function deployPosition({
       const createTxArray = Array.isArray(createTxs) ? createTxs : [createTxs];
       for (let i = 0; i < createTxArray.length; i++) {
         const signers = i === 0 ? [wallet, newPosition] : [wallet];
-        const txHash = await sendAndConfirmTransaction(getConnection(), createTxArray[i], signers, { skipPreflight: true });
+        const txHash = await sendManagedTransaction(createTxArray[i], signers, `deploy create ${i + 1}/${createTxArray.length}`);
         txHashes.push(txHash);
         log("deploy", `Create tx ${i + 1}/${createTxArray.length}: ${txHash}`);
       }
@@ -481,7 +559,7 @@ export async function deployPosition({
         });
         const addTxArray = Array.isArray(addTxs) ? addTxs : [addTxs];
         for (let i = 0; i < addTxArray.length; i++) {
-          const txHash = await sendAndConfirmTransaction(getConnection(), addTxArray[i], [wallet], { skipPreflight: true });
+          const txHash = await sendManagedTransaction(addTxArray[i], [wallet], `deploy add-liquidity ${i + 1}/${addTxArray.length}`);
           txHashes.push(txHash);
           log("deploy", `Add liquidity tx ${i + 1}/${addTxArray.length}: ${txHash}`);
         }
@@ -507,7 +585,7 @@ export async function deployPosition({
         strategy: { maxBinId, minBinId, strategyType },
         slippage: 1000, // 10% in bps
       });
-      const txHash = await sendAndConfirmTransaction(getConnection(), tx, [wallet, newPosition], { skipPreflight: true });
+      const txHash = await sendManagedTransaction(tx, [wallet, newPosition], "deploy standard");
       txHashes.push(txHash);
     }
 
@@ -1174,7 +1252,7 @@ export async function claimFees({ position_address }) {
     const txArr = Array.isArray(txs) ? txs : [txs];
     const txHashes = [];
     for (const tx of txArr) {
-      const txHash = await sendAndConfirmTransaction(getConnection(), tx, [wallet], { skipPreflight: true });
+      const txHash = await sendManagedTransaction(tx, [wallet], "claim fees");
       txHashes.push(txHash);
     }
     const txHash = txHashes[0];
@@ -1196,7 +1274,12 @@ export async function closePosition({ position_address, _pnlOverride = null }) {
     return { dry_run: true, would_close: position_address, message: "DRY RUN — no transaction sent" };
   }
 
-  try {
+  if (closeInflight.has(position_address)) {
+    return closeInflight.get(position_address);
+  }
+
+  const closePromise = (async () => {
+    try {
     log("close", `Closing position: ${position_address}`);
     const wallet = getWallet();
     const poolAddress = await lookupPoolForPosition(position_address, wallet.publicKey.toString());
@@ -1255,7 +1338,7 @@ export async function closePosition({ position_address, _pnlOverride = null }) {
         position: positionData,
       });
       for (const tx of Array.isArray(claimTxs) ? claimTxs : [claimTxs]) {
-        const claimHash = await sendAndConfirmTransaction(getConnection(), tx, [wallet], { skipPreflight: true });
+        const claimHash = await sendManagedTransaction(tx, [wallet], "close claim fees");
         txHashes.push(claimHash);
       }
       log("close", `Step 1 OK: ${txHashes.join(", ")}`);
@@ -1276,7 +1359,7 @@ export async function closePosition({ position_address, _pnlOverride = null }) {
       });
 
       for (const tx of Array.isArray(closeTx) ? closeTx : [closeTx]) {
-        const txHash = await sendAndConfirmTransaction(getConnection(), tx, [wallet], { skipPreflight: true });
+        const txHash = await sendManagedTransaction(tx, [wallet], "close remove liquidity");
         txHashes.push(txHash);
       }
     } catch (removeErr) {
@@ -1292,7 +1375,7 @@ export async function closePosition({ position_address, _pnlOverride = null }) {
         owner: wallet.publicKey,
         position: positionData,
       });
-      const txHash = await sendAndConfirmTransaction(getConnection(), closeTx, [wallet], { skipPreflight: true });
+      const txHash = await sendManagedTransaction(closeTx, [wallet], "close zombie position");
       txHashes.push(txHash);
     }
     log("close", `SUCCESS txs: ${txHashes.join(", ")}`);
@@ -1381,10 +1464,16 @@ export async function closePosition({ position_address, _pnlOverride = null }) {
     }
 
     return { success: true, position: position_address, pool: poolAddress, txs: txHashes };
-  } catch (error) {
-    log("close_error", error.message);
-    return { success: false, error: error.message };
-  }
+    } catch (error) {
+      log("close_error", error.message);
+      return { success: false, error: error.message };
+    } finally {
+      closeInflight.delete(position_address);
+    }
+  })();
+
+  closeInflight.set(position_address, closePromise);
+  return closePromise;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────

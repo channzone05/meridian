@@ -118,6 +118,7 @@ function startCronJobs() {
   stopCronJobs(); // stop any running tasks before (re)starting
 
   const mgmtTask = cron.schedule(`*/${Math.max(1, config.schedule.managementIntervalMin)} * * * *`, async () => {
+    if (isBusy()) { log("cron", "Management deferred — position action in progress"); return; }
     if (isManagementBusy()) return;
     if (isScreeningBusy()) { log("cron", "Management deferred — screening cycle in progress"); return; }
 
@@ -296,6 +297,7 @@ Example: "AVOID: Entering NOTHING-SOL during 4h +70% pump — reversal risk is h
   });
 
   const screenTask = cron.schedule(`*/${Math.max(1, config.schedule.screeningIntervalMin)} * * * *`, async () => {
+    if (isBusy()) { log("cron", "Screening deferred — position action in progress"); return; }
     if (isScreeningBusy()) return;
     if (isManagementBusy()) { log("cron", "Screening deferred — management cycle in progress"); return; }
 

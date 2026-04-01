@@ -37,6 +37,7 @@
   "minTokenFeesSol": 30,
 
   "takeProfitFeePct": 5,
+  "priorityFeeLevel": "Medium",
   "stopLossPct": -20,
   "trailingTakeProfit": true,
   "trailingTriggerPct": 3,

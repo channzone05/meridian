@@ -65,6 +65,7 @@ export const config = {
     gasReserve:            u.gasReserve        ?? 0.2,   // always keep this much SOL for gas
     positionSizePct:       u.positionSizePct   ?? 0.35,  // % of deployable capital per position
     pnlUnit:               u.pnlUnit           ?? "sol", // "sol" or "usd" — how PnL is displayed
+    priorityFeeLevel:      u.priorityFeeLevel  ?? "Medium",
   },
 
   // ─── Strategy Mapping ───────────────────

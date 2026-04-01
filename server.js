@@ -17,6 +17,7 @@ import {
   setBusy,
   isManagementBusy,
   isScreeningBusy,
+  setScreeningBusy,
 } from "./session.js";
 import { emit, on } from "./notifier.js";
 import { agentLoop, lightChat, screenerLoop } from "./agent.js";
@@ -467,6 +468,7 @@ export function startServer(timersFn) {
             break;
           }
           setBusy(true);
+          setScreeningBusy(true);
           try {
             const currentBalance = await getWalletBalances().catch(() => null);
             const deployAmount = currentBalance ? computeDeployAmount(currentBalance.sol) : config.management.deployAmountSol;
@@ -477,6 +479,7 @@ export function startServer(timersFn) {
             appendHistory("auto", content);
             emit("chat:response", { text: content, ts: new Date().toISOString() });
           } finally {
+            setScreeningBusy(false);
             setBusy(false);
           }
           break;
@@ -491,6 +494,7 @@ export function startServer(timersFn) {
               break;
             }
             setBusy(true);
+            setScreeningBusy(true);
             try {
               const { candidates } = await getTopCandidates({ limit: 10 });
               if (pick > candidates.length) {
@@ -507,6 +511,7 @@ export function startServer(timersFn) {
               appendHistory(`deploy #${pick} ${pool.name}`, content);
               emit("chat:response", { text: content, ts: new Date().toISOString() });
             } finally {
+              setScreeningBusy(false);
               setBusy(false);
             }
             break;
