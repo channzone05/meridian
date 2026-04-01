@@ -340,7 +340,7 @@ export function setLastBriefingDate() {
  * Reconcile local state with actual on-chain positions.
  * Marks any local open positions as closed if they are not in the on-chain list.
  */
-const SYNC_GRACE_MS = 5 * 60_000; // don't auto-close positions deployed < 5 min ago
+const SYNC_GRACE_MS = 1 * 60_000; // don't auto-close positions deployed < 1 min ago
 
 export async function syncOpenPositions(active_addresses) {
   const state = load();
