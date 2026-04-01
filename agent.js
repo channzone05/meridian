@@ -516,26 +516,53 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
         return { content: msg.content, userMessage: goal };
       }
 
-      // Execute each tool call in parallel
-      const toolResults = await Promise.all(msg.tool_calls.map(async (toolCall) => {
+      // On-chain write operations must run sequentially to avoid blockhash
+      // expiry from parallel Solana transactions competing for block space.
+      // Read-only tools can still run in parallel for speed.
+      const WRITE_TOOLS = new Set(["deploy_position", "close_position", "claim_fees", "swap_token"]);
+      const writeCalls = msg.tool_calls.filter(tc => WRITE_TOOLS.has(tc.function.name));
+      const readCalls = msg.tool_calls.filter(tc => !WRITE_TOOLS.has(tc.function.name));
+
+      // Run read-only calls in parallel
+      const readResults = await Promise.all(readCalls.map(async (toolCall) => {
         const functionName = toolCall.function.name;
         let functionArgs;
-
         try {
           functionArgs = JSON.parse(toolCall.function.arguments);
         } catch (parseError) {
           log("error", `Failed to parse args for ${functionName}: ${parseError.message}`);
           functionArgs = {};
         }
-
         const result = await executeTool(functionName, functionArgs);
-
         return {
           role: "tool",
           tool_call_id: toolCall.id,
           content: JSON.stringify(result),
         };
       }));
+
+      // Run write calls sequentially
+      const writeResults = [];
+      for (const toolCall of writeCalls) {
+        const functionName = toolCall.function.name;
+        let functionArgs;
+        try {
+          functionArgs = JSON.parse(toolCall.function.arguments);
+        } catch (parseError) {
+          log("error", `Failed to parse args for ${functionName}: ${parseError.message}`);
+          functionArgs = {};
+        }
+        const result = await executeTool(functionName, functionArgs);
+        writeResults.push({
+          role: "tool",
+          tool_call_id: toolCall.id,
+          content: JSON.stringify(result),
+        });
+      }
+
+      // Merge results in original call order
+      const resultMap = new Map([...readResults, ...writeResults].map(r => [r.tool_call_id, r]));
+      const toolResults = msg.tool_calls.map(tc => resultMap.get(tc.id));
 
       messages.push(...toolResults);
     } catch (error) {
