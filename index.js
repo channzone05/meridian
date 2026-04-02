@@ -68,8 +68,12 @@ function formatCountdown(seconds) {
 }
 
 function buildPrompt() {
-  const mgmt  = formatCountdown(nextRunIn(timers.managementLastRun, config.schedule.managementIntervalMin));
-  const scrn  = formatCountdown(nextRunIn(timers.screeningLastRun,  config.schedule.screeningIntervalMin));
+  const mgmt = isManagementBusy()
+    ? "running"
+    : formatCountdown(nextRunIn(timers.managementLastRun, config.schedule.managementIntervalMin));
+  const scrn = isScreeningBusy()
+    ? "running"
+    : formatCountdown(nextRunIn(timers.screeningLastRun, config.schedule.screeningIntervalMin));
   return `[manage: ${mgmt} | screen: ${scrn}]\n> `;
 }
 
@@ -118,9 +122,17 @@ function startCronJobs() {
   stopCronJobs(); // stop any running tasks before (re)starting
 
   const mgmtTask = cron.schedule(`*/${Math.max(1, config.schedule.managementIntervalMin)} * * * *`, async () => {
-    if (isBusy()) { log("cron", "Management deferred — position action in progress"); return; }
+    if (isBusy()) {
+      timers.managementLastRun = Date.now();
+      log("cron", "Management deferred — position action in progress");
+      return;
+    }
     if (isManagementBusy()) return;
-    if (isScreeningBusy()) { log("cron", "Management deferred — screening cycle in progress"); return; }
+    if (isScreeningBusy()) {
+      timers.managementLastRun = Date.now();
+      log("cron", "Management deferred — screening cycle in progress");
+      return;
+    }
 
     // Skip management entirely if no open positions — saves LLM tokens
     try {
@@ -297,9 +309,17 @@ Example: "AVOID: Entering NOTHING-SOL during 4h +70% pump — reversal risk is h
   });
 
   const screenTask = cron.schedule(`*/${Math.max(1, config.schedule.screeningIntervalMin)} * * * *`, async () => {
-    if (isBusy()) { log("cron", "Screening deferred — position action in progress"); return; }
+    if (isBusy()) {
+      timers.screeningLastRun = Date.now();
+      log("cron", "Screening deferred — position action in progress");
+      return;
+    }
     if (isScreeningBusy()) return;
-    if (isManagementBusy()) { log("cron", "Screening deferred — management cycle in progress"); return; }
+    if (isManagementBusy()) {
+      timers.screeningLastRun = Date.now();
+      log("cron", "Screening deferred — management cycle in progress");
+      return;
+    }
 
     // Hard guards — don't even run the agent if preconditions aren't met
     try {
@@ -616,13 +636,13 @@ if (runtimeMode.interactive) {
     prompt: buildPrompt(),
   });
 
-  // Update prompt countdown every 10 seconds
+  // Update prompt countdown/status frequently so cron state does not look stale.
   const promptInterval = setInterval(() => {
     if (!isBusy()) {
       rl.setPrompt(buildPrompt());
       rl.prompt(true); // true = preserve current line
     }
-  }, 10_000);
+  }, 1_000);
 
   async function runBusy(fn) {
     if (isBusy()) { console.log("Agent is busy, please wait..."); rl.prompt(); return; }
