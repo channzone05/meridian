@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import DashboardTab from "./DashboardTab";
 import CandidatesTab from "./CandidatesTab";
 import ActivityTab from "./ActivityTab";
+import IntelTab from "./IntelTab";
 
 interface DataSidebarProps {
   positions: PositionData | null;
@@ -47,6 +48,7 @@ export default function DataSidebar({ positions, wallet, candidates, notificatio
       <TabsList>
         <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
         <TabsTrigger value="candidates">Candidates</TabsTrigger>
+        <TabsTrigger value="intel">Intel</TabsTrigger>
         <TabsTrigger value="activity">Activity</TabsTrigger>
       </TabsList>
 
@@ -56,6 +58,10 @@ export default function DataSidebar({ positions, wallet, candidates, notificatio
 
       <TabsContent value="candidates" className="flex-1">
         <CandidatesTab candidates={candidates} onCommand={onCommand} />
+      </TabsContent>
+
+      <TabsContent value="intel" className="flex-1">
+        <IntelTab />
       </TabsContent>
 
       <TabsContent value="activity" className="flex-1">

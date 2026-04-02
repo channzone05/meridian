@@ -33,7 +33,9 @@ export function setStartupCache({ wallet, positions, candidates, lpOverview }) {
   _startupCache = { wallet, positions, candidates, lpOverview, ts: Date.now() };
 }
 import { getPerformanceSummary, getPerformanceHistory, listLessons, evolveThresholds } from "./lessons.js";
-import { getMemoryContext } from "./memory.js";
+import { getMemoryDashboardData } from "./memory.js";
+import { loadWeights } from "./signal-weights.js";
+import { getActiveExperiment, loadAutoresearch } from "./autoresearch.js";
 import { buildKnowledgeGraph } from "./tools/knowledge-graph.js";
 import { log } from "./logger.js";
 import { getScreeningThresholdSummary, normalizeCandidatesPayload } from "./runtime-helpers.js";
@@ -71,6 +73,74 @@ function buildStatus() {
     busy: isBusy(),
     managementBusy: isManagementBusy(),
     screeningBusy: isScreeningBusy(),
+  };
+}
+
+function buildDarwinPayload() {
+  const data = loadWeights();
+  const weights = Object.entries(data.weights || {})
+    .map(([signal, weight]) => ({
+      signal,
+      weight,
+      direction: data.directions?.[signal] ?? "unknown",
+    }))
+    .sort((a, b) => b.weight - a.weight);
+
+  return {
+    enabled: config.darwin?.enabled === true,
+    config: config.darwin ?? {},
+    last_recalc: data.last_recalc ?? null,
+    recalc_count: data.recalc_count ?? 0,
+    weights,
+    history: Array.isArray(data.history) ? data.history.slice(-12) : [],
+  };
+}
+
+function buildAutoresearchPayload() {
+  const state = loadAutoresearch();
+  const activeExperiment = getActiveExperiment();
+  const recentExperiments = Array.isArray(state.experiments)
+    ? state.experiments
+        .slice(-12)
+        .reverse()
+        .map((experiment) => ({
+          id: experiment.id,
+          section: experiment.section,
+          hypothesis: experiment.hypothesis,
+          status: experiment.status,
+          started_at: experiment.started_at,
+          baseline: experiment.baseline ?? null,
+          trial: experiment.trial ?? null,
+        }))
+    : [];
+
+  return {
+    enabled: config.autoresearch?.enabled === true,
+    config: config.autoresearch ?? {},
+    cooldownRemaining: state.cooldownRemaining ?? 0,
+    active: activeExperiment
+      ? {
+          id: activeExperiment.id,
+          section: activeExperiment.section,
+          hypothesis: activeExperiment.hypothesis,
+          status: activeExperiment.status,
+          started_at: activeExperiment.started_at,
+          baseline: activeExperiment.baseline ?? null,
+          trial: activeExperiment.trial ?? null,
+        }
+      : null,
+    keptOverrideSections: Object.keys(state.kept_overrides || {}),
+    recentExperiments,
+    recentLessons: listLessons({ tag: "autoresearch", limit: 20 }).lessons,
+  };
+}
+
+function buildInsightsPayload() {
+  return {
+    lessons: listLessons({ limit: 30 }),
+    memory: getMemoryDashboardData(),
+    darwin: buildDarwinPayload(),
+    autoresearch: buildAutoresearchPayload(),
   };
 }
 
@@ -117,6 +187,15 @@ export function startServer(timersFn) {
       res.json(normalizeCandidatesPayload(result));
     } catch (err) {
       log("server_error", `GET /api/candidates failed: ${err.message}`);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/insights", (_req, res) => {
+    try {
+      res.json(buildInsightsPayload());
+    } catch (err) {
+      log("server_error", `GET /api/insights failed: ${err.message}`);
       res.status(500).json({ error: err.message });
     }
   });
@@ -556,7 +635,15 @@ export function startServer(timersFn) {
           break;
         }
         case "memory": {
-          data = getMemoryContext();
+          data = getMemoryDashboardData();
+          break;
+        }
+        case "darwin-weights": {
+          data = buildDarwinPayload();
+          break;
+        }
+        case "autoresearch": {
+          data = buildAutoresearchPayload();
           break;
         }
         case "settings": {
