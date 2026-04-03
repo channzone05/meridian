@@ -97,26 +97,26 @@ async function codexAgentLoop(goal, maxSteps, systemPrompt) {
   // Enrich ALL candidates with the same data the cron path uses
   const { checkSmartWalletsOnPool } = await import("./smart-wallets.js");
   const { getTokenHolders, getTokenNarrative } = await import("./tools/token.js");
-  const { fetchOkxPriceInfo } = await import("./tools/okx.js");
+  const { fetchOkxPriceInfo, fetchOkxDexSignal } = await import("./tools/okx.js");
   const { recallForPool } = await import("./pool-memory.js");
 
   const enriched = await Promise.all(candidates.candidates.map(async (c) => {
     const mint = c.base_mint || c.base?.mint;
-    const [study, sw, holders, narrative, poolMem, tokenInfo, okxData] = await Promise.allSettled([
+    const [study, sw, holders, narrative, poolMem, tokenInfo, okxData, okxSignal] = await Promise.allSettled([
       studyTopLPers({ pool_address: c.pool }).catch(() => null),
       checkSmartWalletsOnPool({ pool_address: c.pool }),
       mint ? getTokenHolders({ mint }) : null,
       mint ? getTokenNarrative({ mint }) : null,
       recallForPool(c.pool),
-      mint ? getTokenInfo({ mint }).catch(() => null) : null,
+      mint ? getTokenInfo({ query: mint }).catch(() => null) : null,
       mint ? fetchOkxPriceInfo(mint) : null,
+      mint ? fetchOkxDexSignal(mint) : null,
     ]);
 
     const data = { ...c };
     const val = (r) => r.status === "fulfilled" ? r.value : null;
     if (val(study)) data._study = val(study);
-    if (val(sw)?.found?.length > 0) data._smart_wallets = val(sw).found.length;
-    else data._smart_wallets = 0;
+    data._smart_wallets = val(sw)?.in_pool?.length || 0;
     const h = val(holders);
     if (h) {
       data._global_fees_sol = h.global_fees_sol;
@@ -131,6 +131,7 @@ async function codexAgentLoop(goal, maxSteps, systemPrompt) {
       data._ath_proximity_pct = okx.ath_proximity_pct;
       data._momentum = { change_5m: okx.change_5m, change_1h: okx.change_1h, change_4h: okx.change_4h };
     }
+    if (val(okxSignal)) data._okx_signal = val(okxSignal);
     return data;
   }));
 
@@ -156,6 +157,13 @@ ${dataBlock}
 ---
 TASK:
 ${goal}
+
+OKX signal interpretation:
+- latest_signal_age_min lower = fresher wallet interest
+- signal_count_30m / signal_count_2h and signal_amount_usd_30m / signal_amount_usd_2h measure recent wallet conviction
+- latest_sold_ratio_percent lower = signal wallets are still holding; higher = signal more exhausted
+- Use OKX signal as confirmation only, never as a standalone deploy trigger
+- Missing OKX signal is neutral, not a hard fail
 
 IMPORTANT: You must respond with a JSON deployment plan. Do NOT try to call any tools or run any commands. If you recommend deploying, respond with ONLY a JSON block like:
 \`\`\`json
