@@ -18,7 +18,13 @@ export function readCodexOAuthToken() {
 
   try {
     const auth = JSON.parse(readFileSync(authPath, "utf8"));
-    const token = auth.access_token || auth.api_key || auth.token;
+    const token = auth.access_token
+      || auth.api_key
+      || auth.token
+      || auth.OPENAI_API_KEY
+      || auth.tokens?.access_token
+      || auth.tokens?.api_key
+      || auth.tokens?.token;
     if (!token) {
       throw new Error("No token field found in ~/.codex/auth.json");
     }
