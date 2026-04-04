@@ -17,6 +17,9 @@ if (u.llmModel)  process.env.LLM_MODEL          ||= u.llmModel;
 if (u.codexPath) process.env.CODEX_PATH         ||= u.codexPath;
 if (u.dryRun !== undefined) process.env.DRY_RUN ||= String(u.dryRun);
 
+const isCodexProvider = (process.env.LLM_PROVIDER || "openrouter") === "codex";
+const DEFAULT_MODEL = isCodexProvider ? "gpt-4o" : "openai/gpt-5.4-nano";
+
 export const config = {
   // ─── Risk Limits ─────────────────────────
   risk: {
@@ -86,9 +89,9 @@ export const config = {
     temperature: u.temperature ?? 0.373,
     maxTokens:   u.maxTokens   ?? 4096,
     maxSteps: u.maxSteps ?? 20,
-    managementModel: u.managementModel ?? process.env.LLM_MODEL ?? "openai/gpt-5.4-nano",
-    screeningModel:  u.screeningModel  ?? process.env.LLM_MODEL ?? "openai/gpt-5.4-nano",
-    generalModel:    u.generalModel    ?? process.env.LLM_MODEL ?? "openai/gpt-5.4-nano",
+    managementModel: u.managementModel ?? process.env.LLM_MODEL ?? DEFAULT_MODEL,
+    screeningModel:  u.screeningModel  ?? process.env.LLM_MODEL ?? DEFAULT_MODEL,
+    generalModel:    u.generalModel    ?? process.env.LLM_MODEL ?? DEFAULT_MODEL,
     managementFallbackModel: u.managementFallbackModel ?? null,
     screeningFallbackModel:  u.screeningFallbackModel  ?? null,
     generalFallbackModel:    u.generalFallbackModel    ?? null,
@@ -119,7 +122,7 @@ export const config = {
     improvementPct: u.autoresearchImprovementPct ?? 15,
     declinePct: u.autoresearchDeclinePct ?? 15,
     cooldownCloses: u.autoresearchCooldownCloses ?? 5,
-    llmModel: u.autoresearchModel ?? "openai/gpt-5.4-nano",
+    llmModel: u.autoresearchModel ?? DEFAULT_MODEL,
   },
 
   // ─── Common Token Mints ────────────────

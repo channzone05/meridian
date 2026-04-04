@@ -1,5 +1,7 @@
 import { spawn, spawnSync } from "child_process";
-import { existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
+import { homedir } from "os";
+import { join } from "path";
 import OpenAI from "openai";
 import { fileURLToPath } from "url";
 import { buildSystemPrompt } from "./prompt.js";
@@ -19,18 +21,39 @@ import { studyTopLPers } from "./tools/study.js";
 import { checkSmartWalletsOnPool } from "./smart-wallets.js";
 import { getTokenHolders, getTokenNarrative, getTokenInfo } from "./tools/token.js";
 
-// Configurable LLM provider: "openrouter" (default) or "deepseek"
-const provider = process.env.LLM_PROVIDER || "openrouter";
-const client = new OpenAI({
-  baseURL: provider === "deepseek"
-    ? "https://api.deepseek.com"
-    : "https://openrouter.ai/api/v1",
-  apiKey: provider === "deepseek"
-    ? process.env.DEEPSEEK_API_KEY
-    : process.env.OPENROUTER_API_KEY,
-});
+// ─── Codex OAuth token reader ────────────────────────────────
+function readCodexOAuthToken() {
+  const authPath = join(homedir(), ".codex", "auth.json");
+  try {
+    const auth = JSON.parse(readFileSync(authPath, "utf8"));
+    // Codex stores the token as access_token or api_key
+    const token = auth.access_token || auth.api_key || auth.token;
+    if (!token) throw new Error("No token found in ~/.codex/auth.json");
+    return token;
+  } catch (err) {
+    log("error", `Failed to read Codex OAuth token: ${err.message}. Run 'codex login' first.`);
+    throw new Error("Codex OAuth token not found. Run 'codex login' to authenticate.");
+  }
+}
 
-const DEFAULT_MODEL = process.env.LLM_MODEL || "openai/gpt-5.4-nano";
+// Configurable LLM provider: "openrouter" (default), "deepseek", or "codex"
+const provider = process.env.LLM_PROVIDER || "openrouter";
+
+function getProviderConfig() {
+  if (provider === "codex") {
+    return { baseURL: "https://api.openai.com/v1", apiKey: readCodexOAuthToken() };
+  }
+  if (provider === "deepseek") {
+    return { baseURL: "https://api.deepseek.com", apiKey: process.env.DEEPSEEK_API_KEY };
+  }
+  return { baseURL: "https://openrouter.ai/api/v1", apiKey: process.env.OPENROUTER_API_KEY };
+}
+
+const client = new OpenAI(getProviderConfig());
+
+const DEFAULT_MODEL = provider === "codex"
+  ? (process.env.LLM_MODEL || "gpt-4o")
+  : (process.env.LLM_MODEL || "openai/gpt-5.4-nano");
 const CODEX_SCREENING_SCHEMA_PATH = fileURLToPath(new URL("./tools/codex-screening-plan.schema.json", import.meta.url));
 
 export function isCodexScreenerEnabled() {
