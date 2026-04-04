@@ -22,7 +22,7 @@ import { startPnlWatcher, stopPnlWatcher } from "./pnl-watcher.js";
 import { recordPositionSnapshot as recordPoolSnapshot, recallForPool } from "./pool-memory.js";
 import { checkSmartWalletsOnPool } from "./smart-wallets.js";
 import { getTokenHolders, getTokenNarrative, getTokenInfo } from "./tools/token.js";
-import { fetchOkxPriceInfo } from "./tools/okx.js";
+import { fetchOkxPriceInfo, fetchOkxDexSignal } from "./tools/okx.js";
 import {
   sessionHistory, appendHistory, getHistory,
   isBusy, setBusy,
@@ -68,8 +68,12 @@ function formatCountdown(seconds) {
 }
 
 function buildPrompt() {
-  const mgmt  = formatCountdown(nextRunIn(timers.managementLastRun, config.schedule.managementIntervalMin));
-  const scrn  = formatCountdown(nextRunIn(timers.screeningLastRun,  config.schedule.screeningIntervalMin));
+  const mgmt = isManagementBusy()
+    ? "running"
+    : formatCountdown(nextRunIn(timers.managementLastRun, config.schedule.managementIntervalMin));
+  const scrn = isScreeningBusy()
+    ? "running"
+    : formatCountdown(nextRunIn(timers.screeningLastRun, config.schedule.screeningIntervalMin));
   return `[manage: ${mgmt} | screen: ${scrn}]\n> `;
 }
 
@@ -118,8 +122,17 @@ function startCronJobs() {
   stopCronJobs(); // stop any running tasks before (re)starting
 
   const mgmtTask = cron.schedule(`*/${Math.max(1, config.schedule.managementIntervalMin)} * * * *`, async () => {
+    if (isBusy()) {
+      timers.managementLastRun = Date.now();
+      log("cron", "Management deferred — position action in progress");
+      return;
+    }
     if (isManagementBusy()) return;
-    if (isScreeningBusy()) { log("cron", "Management deferred — screening cycle in progress"); return; }
+    if (isScreeningBusy()) {
+      timers.managementLastRun = Date.now();
+      log("cron", "Management deferred — screening cycle in progress");
+      return;
+    }
 
     // Skip management entirely if no open positions — saves LLM tokens
     try {
@@ -296,8 +309,17 @@ Example: "AVOID: Entering NOTHING-SOL during 4h +70% pump — reversal risk is h
   });
 
   const screenTask = cron.schedule(`*/${Math.max(1, config.schedule.screeningIntervalMin)} * * * *`, async () => {
+    if (isBusy()) {
+      timers.screeningLastRun = Date.now();
+      log("cron", "Screening deferred — position action in progress");
+      return;
+    }
     if (isScreeningBusy()) return;
-    if (isManagementBusy()) { log("cron", "Screening deferred — management cycle in progress"); return; }
+    if (isManagementBusy()) {
+      timers.screeningLastRun = Date.now();
+      log("cron", "Screening deferred — management cycle in progress");
+      return;
+    }
 
     // Hard guards — don't even run the agent if preconditions aren't met
     try {
@@ -396,13 +418,15 @@ ${activeStrategy ? `\nSAVED STRATEGY (reference, not mandatory): ${activeStrateg
           dynFeeMap[c.pool] = await fetchDynamicFee(c.pool);
         }
         const blocks = await Promise.allSettled(candidates.map(async (c) => {
-          const [sw, holders, narrative, poolMem, tokenInfo, okxData] = await Promise.allSettled([
+          const baseMint = c.base_mint || c.base?.mint || null;
+          const [sw, holders, narrative, poolMem, tokenInfo, okxData, okxSignal] = await Promise.allSettled([
             checkSmartWalletsOnPool({ pool_address: c.pool }),
-            c.base_mint ? getTokenHolders({ mint: c.base_mint }) : null,
-            c.base_mint ? getTokenNarrative({ mint: c.base_mint }) : null,
+            baseMint ? getTokenHolders({ mint: baseMint }) : null,
+            baseMint ? getTokenNarrative({ mint: baseMint }) : null,
             recallForPool(c.pool),
-            c.base_mint ? getTokenInfo({ query: c.base_mint }) : null,
-            c.base_mint ? fetchOkxPriceInfo(c.base_mint) : null,
+            baseMint ? getTokenInfo({ query: baseMint }) : null,
+            baseMint ? fetchOkxPriceInfo(baseMint) : null,
+            baseMint ? fetchOkxDexSignal(baseMint) : null,
           ]);
           const swResult = sw.status === "fulfilled" ? sw.value : null;
           const holdResult = holders.status === "fulfilled" ? holders.value : null;
@@ -410,9 +434,13 @@ ${activeStrategy ? `\nSAVED STRATEGY (reference, not mandatory): ${activeStrateg
           const memResult = poolMem.status === "fulfilled" ? poolMem.value : null;
           const infoResult = tokenInfo.status === "fulfilled" ? tokenInfo.value : null;
           const okxResult = okxData.status === "fulfilled" ? okxData.value : null;
+          const okxSignalResult = okxSignal.status === "fulfilled" ? okxSignal.value : null;
           c._okxResult = okxResult;  // attach to candidate for signal staging
+          c._okxSignal = okxSignalResult;
           const dynFeeResult = dynFeeMap[c.pool] || null;
           const tokenData = infoResult?.results?.[0];
+          const smartWalletCount = swResult?.in_pool?.length || 0;
+          c._smartWalletCount = smartWalletCount;
 
           let block = `[${c.name}] pool: ${c.pool} | bin_step: ${c.bin_step} | fee/aTVL: ${c.fee_active_tvl_ratio}% | vol: $${c.volume} | organic: ${c.organic_score} | holders: ${c.holders} | volatility: ${c.volatility ?? "?"}`;
 
@@ -421,7 +449,7 @@ ${activeStrategy ? `\nSAVED STRATEGY (reference, not mandatory): ${activeStrateg
             if (tokenData.mcap) block += ` | mcap: $${(tokenData.mcap / 1000).toFixed(0)}k`;
             if (tokenData.stats_1h?.price_change) block += ` | 1h: ${tokenData.stats_1h.price_change}%`;
           }
-          if (swResult?.found?.length > 0) block += `\n  Smart wallets: ${swResult.found.length} found`;
+          if (smartWalletCount > 0) block += `\n  Smart wallets: ${smartWalletCount} found`;
           else block += `\n  Smart wallets: none`;
           if (holdResult?.global_fees_sol != null) block += ` | global_fees: ${holdResult.global_fees_sol} SOL`;
           if (holdResult?.top_10_real_holders_pct != null) block += ` | top10: ${holdResult.top_10_real_holders_pct}%`;
@@ -436,6 +464,9 @@ ${activeStrategy ? `\nSAVED STRATEGY (reference, not mandatory): ${activeStrateg
             if (okxResult.change_1h > 10 && okxResult.change_5m < -2) {
               block += `\n  MOMENTUM WARNING: pump fading (1h +${okxResult.change_1h}%, 5m ${okxResult.change_5m}%) — widen range or consider skipping`;
             }
+          }
+          if (okxSignalResult) {
+            block += `\n  OKX signal: ${okxSignalResult.summary}`;
           }
           return block;
         }));
@@ -453,14 +484,18 @@ ${activeStrategy ? `\nSAVED STRATEGY (reference, not mandatory): ${activeStrateg
               volatility: c.volatility ?? null,
               mcap: c.mcap ?? null,
               holder_count: c.holders ?? null,
-              smart_wallets_present: blocks.some(b =>
-                b.status === "fulfilled" && b.value?.includes?.(c.name) && b.value?.includes?.("Smart wallets:") && !b.value?.includes?.("Smart wallets: none")
-              ) || false,
+              smart_wallets_present: (c._smartWalletCount || 0) > 0,
               narrative_quality: null, // filled by tool signal capture in executor
               study_win_rate: null,    // filled by tool signal capture in executor
               hive_consensus: null,    // filled by hive mind if available
               ath_proximity: c._okxResult?.ath_proximity_pct ?? null,
-            }, c.base_mint || null);
+              okx_signal_count_30m: c._okxSignal?.signal_count_30m ?? null,
+              okx_signal_count_2h: c._okxSignal?.signal_count_2h ?? null,
+              okx_signal_amount_30m: c._okxSignal?.signal_amount_usd_30m ?? null,
+              okx_signal_amount_2h: c._okxSignal?.signal_amount_usd_2h ?? null,
+              okx_latest_signal_age_min: c._okxSignal?.latest_signal_age_min ?? null,
+              okx_latest_sold_ratio: c._okxSignal?.latest_sold_ratio_percent ?? null,
+            }, c.base_mint || c.base?.mint || null);
           } catch { /* staging is best-effort */ }
         }
         // Hive mind consensus (if enabled)
@@ -487,15 +522,19 @@ ${activeStrategy ? `\nSAVED STRATEGY (reference, not mandatory): ${activeStrateg
         }
       } catch { /* best-effort */ }
 
+      const okxSignalGuide = candidateBlocks
+        ? `\n\nOKX SIGNAL INTERPRETATION:\n- latest_signal_age_min lower = fresher wallet interest\n- signal_count_30m / signal_count_2h and signal_amount_usd_30m / signal_amount_usd_2h measure recent wallet conviction\n- latest_sold_ratio_percent lower = signal wallets are still holding; higher = signal more exhausted\n- Use OKX signal as confirmation only, never as a standalone deploy trigger\n- Missing OKX signal is neutral, not a hard fail\n`
+        : "";
+
       const { content } = await screenerLoop(`
-SCREENING CYCLE — DEPLOY ONLY${memoryHints}${signalWeightsBlock}${candidateBlocks}
+SCREENING CYCLE — DEPLOY ONLY${memoryHints}${signalWeightsBlock}${candidateBlocks}${okxSignalGuide}
 ${strategyBlock}
-${candidateBlocks ? `The candidates above are PRE-LOADED with smart wallet, holder, narrative, and memory data.
+${candidateBlocks ? `The candidates above are PRE-LOADED with smart wallet, holder, narrative, memory, and OKX signal data.
 Evaluate them directly — no need to call get_top_candidates, check_smart_wallets_on_pool, get_token_holders, or get_token_narrative again.
 HARD SKIP rules still apply:
 - global_fees_sol < ${config.screening.minTokenFeesSol} SOL → skip (bundled/scam)
 - top_10_real_holders_pct > 60% OR bundlers > 30% → skip
-- No smart wallets + empty/hype narrative → skip
+- No smart wallets or OKX confirmation + empty/hype narrative → skip
 
 Pick the best candidate, then: study_top_lpers → deploy_position with ${deployAmount} SOL.
 Size your price_range_pct from the VOLATILITY TABLE in the range selection rules below — NOT from study avg_range_pct.
@@ -614,13 +653,13 @@ if (runtimeMode.interactive) {
     prompt: buildPrompt(),
   });
 
-  // Update prompt countdown every 10 seconds
+  // Update prompt countdown/status frequently so cron state does not look stale.
   const promptInterval = setInterval(() => {
     if (!isBusy()) {
       rl.setPrompt(buildPrompt());
       rl.prompt(true); // true = preserve current line
     }
-  }, 10_000);
+  }, 1_000);
 
   async function runBusy(fn) {
     if (isBusy()) { console.log("Agent is busy, please wait..."); rl.prompt(); return; }

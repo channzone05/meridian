@@ -253,8 +253,8 @@ const screeningIntervalMin = await askNum(
 console.log("\n── LLM ───────────────────────────────────────");
 
 const llmModel = await ask(
-  "LLM model (DeepSeek model ID)",
-  e("llmModel", process.env.LLM_MODEL || "deepseek-chat")
+  "LLM model ID",
+  e("llmModel", process.env.LLM_MODEL || "gpt-4o")
 );
 
 const dryRun = await ask(

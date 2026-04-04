@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { getEffectiveMinSolToOpen } from "./runtime-helpers.js";
+import { getDefaultModelForProvider, getLlmProvider } from "./llm-provider.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const USER_CONFIG_PATH = path.join(__dirname, "user-config.json");
@@ -16,8 +17,7 @@ if (u.walletKey) process.env.WALLET_PRIVATE_KEY ||= u.walletKey;
 if (u.llmModel)  process.env.LLM_MODEL          ||= u.llmModel;
 if (u.dryRun !== undefined) process.env.DRY_RUN ||= String(u.dryRun);
 
-const isCodexProvider = (process.env.LLM_PROVIDER || "openrouter") === "codex";
-const DEFAULT_MODEL = isCodexProvider ? "gpt-4o" : "openai/gpt-5.4-nano";
+const DEFAULT_MODEL = getDefaultModelForProvider(getLlmProvider());
 
 export const config = {
   // ─── Risk Limits ─────────────────────────
@@ -67,6 +67,7 @@ export const config = {
     gasReserve:            u.gasReserve        ?? 0.2,   // always keep this much SOL for gas
     positionSizePct:       u.positionSizePct   ?? 0.35,  // % of deployable capital per position
     pnlUnit:               u.pnlUnit           ?? "sol", // "sol" or "usd" — how PnL is displayed
+    priorityFeeLevel:      u.priorityFeeLevel  ?? "Medium",
   },
 
   // ─── Strategy Mapping ───────────────────

@@ -174,6 +174,54 @@ export function getMemoryContext() {
 }
 
 /**
+ * Structured memory snapshot for the web UI and API consumers.
+ */
+export function getMemoryDashboardData() {
+  const s = getShelf();
+  const nuggets = [];
+  let totalFacts = 0;
+  let recalledFacts = 0;
+
+  for (const nuggetInfo of s.list()) {
+    try {
+      const nugget = s.get(nuggetInfo.name);
+      const facts = nugget.facts();
+      const status = typeof nugget.status === "function" ? nugget.status() : null;
+
+      totalFacts += facts.length;
+      recalledFacts += facts.filter((fact) => (fact.hits ?? 0) > 0).length;
+
+      nuggets.push({
+        name: nuggetInfo.name,
+        fact_count: status?.fact_count ?? facts.length,
+        capacity_used_pct: status?.capacity_used_pct ?? null,
+        facts: facts
+          .slice()
+          .sort((a, b) => (b.hits ?? 0) - (a.hits ?? 0))
+          .slice(0, 8)
+          .map((fact) => ({
+            key: fact.key,
+            value: fact.value,
+            hits: fact.hits ?? 0,
+          })),
+      });
+    } catch {
+      continue;
+    }
+  }
+
+  nuggets.sort((a, b) => a.name.localeCompare(b.name));
+
+  return {
+    total_nuggets: nuggets.length,
+    total_facts: totalFacts,
+    recalled_facts: recalledFacts,
+    context: getMemoryContext(),
+    nuggets,
+  };
+}
+
+/**
  * Store mid-position observations during management cycles.
  * Builds up a picture of how pools behave over time.
  */

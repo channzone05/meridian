@@ -11,7 +11,8 @@ Meridian screens pools, deploys capital, manages positions, learns from every tr
 ```
                     +-----------------------+
                     |      LLM Engine       |
-                    |   (DeepSeek / Claude)  |
+                    | (Codex / OpenRouter / |
+                    |       DeepSeek)       |
                     +----------+------------+
                                |
                     +----------v------------+
@@ -153,7 +154,8 @@ Quick access to all commands + natural language suggestions.
 ### Requirements
 - Node.js 18+
 - Solana wallet (base58 private key)
-- [OpenRouter](https://openrouter.ai) API key (or any OpenAI-compatible provider)
+- Codex CLI login if using ChatGPT/Codex OAuth (`codex login`)
+- [OpenRouter](https://openrouter.ai) API key if using OpenRouter
 - [Helius](https://helius.dev) RPC URL (recommended)
 - LP Agent API key (optional, for study/overview)
 - Telegram bot token (optional, for notifications)
@@ -189,9 +191,10 @@ Or configure manually via `.env` + `user-config.json`.
 ### Environment Variables
 
 ```env
-OPENROUTER_API_KEY=sk-or-...         # LLM inference (required)
-DEEPSEEK_API_KEY=sk-...              # Fallback provider (optional)
-LLM_PROVIDER=openrouter              # "openrouter" (default) or "deepseek"
+LLM_PROVIDER=codex                   # "codex", "openrouter", or "deepseek"
+OPENROUTER_API_KEY=sk-or-...         # Required only when LLM_PROVIDER=openrouter
+DEEPSEEK_API_KEY=sk-...              # Required only when LLM_PROVIDER=deepseek
+LLM_MODEL=gpt-4o                     # Optional global model override
 WALLET_PRIVATE_KEY=your_base58_key   # Solana wallet (required)
 RPC_URL=https://...helius-rpc.com    # Solana RPC (recommended: Helius)
 HELIUS_API_KEY=your_helius_api_key   # Same key as RPC_URL — used for wallet balance API
@@ -199,6 +202,8 @@ LPAGENT_API_KEY=key1,key2            # LP Agent (optional, comma-separated for r
 TELEGRAM_BOT_TOKEN=123456:ABC...     # Telegram notifications (optional)
 DRY_RUN=true                         # Simulate mode — no on-chain transactions
 ```
+
+When `LLM_PROVIDER=codex`, authenticate once with `codex login`. Meridian will then reuse the locally stored Codex credentials instead of routing model calls through OpenRouter.
 
 ### Run
 
@@ -256,9 +261,9 @@ All fields optional. Edit `user-config.json` or use `update_config` via chat.
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `managementModel` | `deepseek-chat` | Model for position management |
-| `screeningModel` | `deepseek-reasoner` | Model for pool screening |
-| `generalModel` | `deepseek-chat` | Model for chat / commands |
+| `managementModel` | `gpt-4o` | Model for position management |
+| `screeningModel` | `gpt-4o` | Model for pool screening |
+| `generalModel` | `gpt-4o` | Model for chat / commands |
 | `pnlUnit` | `sol` | Display PnL in `sol` or `usd` |
 
 ---

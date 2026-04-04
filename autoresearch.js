@@ -8,7 +8,6 @@
 
 import fs from "fs";
 import path from "path";
-import { homedir } from "os";
 import { fileURLToPath } from "url";
 import { log } from "./logger.js";
 import { config } from "./config.js";
@@ -18,6 +17,7 @@ import {
   clearPromptSectionOverride,
 } from "./prompt.js";
 import { loadWeights } from "./signal-weights.js";
+import { getChatCompletionsEndpoint, getProviderApiKey } from "./llm-provider.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const AUTORESEARCH_FILE = path.join(__dirname, "autoresearch.json");
@@ -368,24 +368,9 @@ function logExperimentLesson(experiment, outcome, improvementPct) {
 
 // ─── LLM Call ────────────────────────────────────────────────
 
-function getAutoresearchProviderConfig() {
-  const provider = process.env.LLM_PROVIDER || "openrouter";
-  if (provider === "codex") {
-    // Read Codex OAuth token from ~/.codex/auth.json
-    const authPath = path.join(homedir(), ".codex", "auth.json");
-    const auth = JSON.parse(fs.readFileSync(authPath, "utf8"));
-    const token = auth.access_token || auth.api_key || auth.token;
-    if (!token) throw new Error("No token in ~/.codex/auth.json. Run 'codex login'.");
-    return { baseURL: "https://api.openai.com/v1/chat/completions", apiKey: token };
-  }
-  if (provider === "deepseek") {
-    return { baseURL: "https://api.deepseek.com/chat/completions", apiKey: process.env.DEEPSEEK_API_KEY };
-  }
-  return { baseURL: "https://openrouter.ai/api/v1/chat/completions", apiKey: process.env.OPENROUTER_API_KEY };
-}
-
 async function callLLM(model, sectionName, lossCount, currentText, failureDesc) {
-  const { baseURL, apiKey } = getAutoresearchProviderConfig();
+  const baseURL = getChatCompletionsEndpoint();
+  const apiKey = getProviderApiKey();
   if (!apiKey) throw new Error("LLM API key/token not available for autoresearch");
 
   const systemMsg = `You optimize prompts for an autonomous LP (Liquidity Provider) trading agent on Meteora/Solana DLMM. The agent uses these prompts as behavioral instructions. Your goal is to make small, surgical edits that reduce losses.

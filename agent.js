@@ -1,12 +1,8 @@
-import { readFileSync } from "fs";
-import { homedir } from "os";
-import { join } from "path";
-import OpenAI from "openai";
 import { buildSystemPrompt } from "./prompt.js";
 import { executeTool } from "./tools/executor.js";
 import { tools } from "./tools/definitions.js";
 import { getWalletBalances } from "./tools/wallet.js";
-import { getMyPositions, getActiveBin } from "./tools/dlmm.js";
+import { getMyPositions } from "./tools/dlmm.js";
 import { log } from "./logger.js";
 import { config } from "./config.js";
 import { getStateSummary } from "./state.js";
@@ -14,40 +10,11 @@ import { getLessonsForPrompt, getPerformanceSummary } from "./lessons.js";
 import { getMemoryContext } from "./memory.js";
 import { getWeightsSummary } from "./signal-weights.js";
 import { getLpOverviewSummary } from "./tools/lp-overview.js";
+import { createLlmClient, getDefaultModelForProvider } from "./llm-provider.js";
 
-// ─── Codex OAuth token reader ────────────────────────────────
-function readCodexOAuthToken() {
-  const authPath = join(homedir(), ".codex", "auth.json");
-  try {
-    const auth = JSON.parse(readFileSync(authPath, "utf8"));
-    // Codex stores the token as access_token or api_key
-    const token = auth.access_token || auth.api_key || auth.token;
-    if (!token) throw new Error("No token found in ~/.codex/auth.json");
-    return token;
-  } catch (err) {
-    log("error", `Failed to read Codex OAuth token: ${err.message}. Run 'codex login' first.`);
-    throw new Error("Codex OAuth token not found. Run 'codex login' to authenticate.");
-  }
-}
+const client = createLlmClient();
 
-// Configurable LLM provider: "openrouter" (default), "deepseek", or "codex"
-const provider = process.env.LLM_PROVIDER || "openrouter";
-
-function getProviderConfig() {
-  if (provider === "codex") {
-    return { baseURL: "https://api.openai.com/v1", apiKey: readCodexOAuthToken() };
-  }
-  if (provider === "deepseek") {
-    return { baseURL: "https://api.deepseek.com", apiKey: process.env.DEEPSEEK_API_KEY };
-  }
-  return { baseURL: "https://openrouter.ai/api/v1", apiKey: process.env.OPENROUTER_API_KEY };
-}
-
-const client = new OpenAI(getProviderConfig());
-
-const DEFAULT_MODEL = provider === "codex"
-  ? (process.env.LLM_MODEL || "gpt-4o")
-  : (process.env.LLM_MODEL || "openai/gpt-5.4-nano");
+const DEFAULT_MODEL = process.env.LLM_MODEL || getDefaultModelForProvider();
 export function getScreenerModelLabel() {
   return config.llm.screeningModel;
 }
@@ -109,6 +76,7 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
     ...sessionHistory,          // inject prior conversation turns
     { role: "user", content: goal },
   ];
+  let consecutiveEmptyResponses = 0;
 
   for (let step = 0; step < maxSteps; step++) {
     log("agent", `Step ${step + 1}/${maxSteps}`);
@@ -166,34 +134,67 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
         // Hermes sometimes returns null content — pop the empty message and retry once
         if (!msg.content) {
           messages.pop(); // remove the empty assistant message
-          log("agent", "Empty response, retrying...");
+          consecutiveEmptyResponses += 1;
+          if (consecutiveEmptyResponses >= 3) {
+            throw new Error(`Model returned ${consecutiveEmptyResponses} empty responses in a row`);
+          }
+          log("agent", `Empty response, retrying (${consecutiveEmptyResponses}/3)...`);
           continue;
         }
+        consecutiveEmptyResponses = 0;
         log("agent", "Final answer reached");
         log("agent", msg.content);
         return { content: msg.content, userMessage: goal };
       }
 
-      // Execute each tool call in parallel
-      const toolResults = await Promise.all(msg.tool_calls.map(async (toolCall) => {
+      consecutiveEmptyResponses = 0;
+      // On-chain write operations must run sequentially to avoid blockhash
+      // expiry from parallel Solana transactions competing for block space.
+      // Read-only tools can still run in parallel for speed.
+      const WRITE_TOOLS = new Set(["deploy_position", "close_position", "claim_fees", "swap_token"]);
+      const writeCalls = msg.tool_calls.filter(tc => WRITE_TOOLS.has(tc.function.name));
+      const readCalls = msg.tool_calls.filter(tc => !WRITE_TOOLS.has(tc.function.name));
+
+      // Run read-only calls in parallel
+      const readResults = await Promise.all(readCalls.map(async (toolCall) => {
         const functionName = toolCall.function.name;
         let functionArgs;
-
         try {
           functionArgs = JSON.parse(toolCall.function.arguments);
         } catch (parseError) {
           log("error", `Failed to parse args for ${functionName}: ${parseError.message}`);
           functionArgs = {};
         }
-
         const result = await executeTool(functionName, functionArgs);
-
         return {
           role: "tool",
           tool_call_id: toolCall.id,
           content: JSON.stringify(result),
         };
       }));
+
+      // Run write calls sequentially
+      const writeResults = [];
+      for (const toolCall of writeCalls) {
+        const functionName = toolCall.function.name;
+        let functionArgs;
+        try {
+          functionArgs = JSON.parse(toolCall.function.arguments);
+        } catch (parseError) {
+          log("error", `Failed to parse args for ${functionName}: ${parseError.message}`);
+          functionArgs = {};
+        }
+        const result = await executeTool(functionName, functionArgs);
+        writeResults.push({
+          role: "tool",
+          tool_call_id: toolCall.id,
+          content: JSON.stringify(result),
+        });
+      }
+
+      // Merge results in original call order
+      const resultMap = new Map([...readResults, ...writeResults].map(r => [r.tool_call_id, r]));
+      const toolResults = msg.tool_calls.map(tc => resultMap.get(tc.id));
 
       messages.push(...toolResults);
     } catch (error) {
@@ -288,4 +289,3 @@ export async function lightChat(goal, sessionHistory = [], model = null) {
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
-
