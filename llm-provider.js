@@ -348,10 +348,12 @@ export function runClaudeCli(model, prompt, {
 
       try {
         const parsed = JSON.parse(output.trim());
-        if (parsed.type === "result" && parsed.result) {
-          resolve(parsed.result);
+        if (parsed.is_error) {
+          reject(new Error(parsed.result || "Claude CLI returned an error"));
+        } else if (parsed.type === "result") {
+          resolve(typeof parsed.result === "string" ? parsed.result.trim() : "");
         } else {
-          reject(new Error(`Unexpected Claude CLI response: ${JSON.stringify(parsed)}`));
+          reject(new Error(`Unexpected Claude CLI response: ${JSON.stringify(parsed).slice(0, 300)}`));
         }
       } catch {
         // If JSON parsing fails, return the raw output as a fallback.
