@@ -11,21 +11,12 @@
   "managementIntervalMin": 10,
   "screeningIntervalMin": 30,
 
-  "managementModel": "deepseek-chat",
-  "screeningModel": "deepseek-reasoner",
-  "generalModel": "deepseek-chat",
-  "codexPath": "C:\\path\\to\\codex.exe",
+  "managementModel": "gpt-4o",
+  "screeningModel": "gpt-4o",
+  "generalModel": "gpt-4o",
   "managementFallbackModel": null,
   "screeningFallbackModel": null,
   "generalFallbackModel": null,
-
-  "codexScreening": false,
-  "codexModel": "gpt-5.4",
-
-  "_comment_codex_provider": "To use Codex OAuth instead of OpenRouter: set LLM_PROVIDER=codex in .env, run 'codex login', and use OpenAI model names below",
-  "_codex_example_managementModel": "gpt-4o",
-  "_codex_example_screeningModel": "gpt-4o",
-  "_codex_example_generalModel": "gpt-4o",
 
   "minFeeActiveTvlRatio": 0.05,
   "minTvl": 10000,
