@@ -411,6 +411,7 @@ MODIFIED_TEXT:
       skipGitRepoCheck: true,
       config: {
         "suppress_unstable_features_warning": "true",
+        "model_reasoning_effort": config.autoresearch?.reasoningEffort ?? "medium",
       },
     });
 

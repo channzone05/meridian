@@ -91,34 +91,39 @@ function resolveCodexLaunch() {
   if (configured) {
     if (process.platform === "win32") {
       if (/\.exe$/i.test(configured)) {
-        return { command: configured };
+        return { command: configured, viaCmd: false };
       }
 
       const siblingExe = configured.replace(/\.(cmd|bat|ps1)$/i, ".exe");
-      if (siblingExe !== configured && existsSync(siblingExe)) return { command: siblingExe };
+      if (siblingExe !== configured && existsSync(siblingExe)) return { command: siblingExe, viaCmd: false };
 
       const codexExe = findExecutableOnPath("codex.exe");
-      if (codexExe) return { command: codexExe };
+      if (codexExe) return { command: codexExe, viaCmd: false };
+
+      if (/\.(cmd|bat)$/i.test(configured)) {
+        return { command: configured, viaCmd: true };
+      }
     }
 
-    return { command: configured };
+    return { command: configured, viaCmd: false };
   }
 
   if (process.platform === "win32") {
     const codexExe = findExecutableOnPath("codex.exe");
-    if (codexExe) return { command: codexExe };
+    if (codexExe) return { command: codexExe, viaCmd: false };
 
     const codexAny = findExecutableOnPath("codex");
-    if (codexAny && /\.exe$/i.test(codexAny)) return { command: codexAny };
+    if (codexAny && /\.exe$/i.test(codexAny)) return { command: codexAny, viaCmd: false };
 
     const codexCmd = findExecutableOnPath("codex.cmd");
     if (codexCmd) {
       const siblingExe = codexCmd.replace(/\.cmd$/i, ".exe");
-      if (siblingExe !== codexCmd && existsSync(siblingExe)) return { command: siblingExe };
+      if (siblingExe !== codexCmd && existsSync(siblingExe)) return { command: siblingExe, viaCmd: false };
+      return { command: codexCmd, viaCmd: true };
     }
   }
 
-  return { command: "codex" };
+  return { command: "codex", viaCmd: false };
 }
 
 function extractCodexMessage(output) {
@@ -177,7 +182,7 @@ export function runCodexExec(model, prompt, {
   return new Promise((resolve, reject) => {
     const stdoutChunks = [];
     const stderrChunks = [];
-    const { command } = resolveCodexLaunch();
+    const { command, viaCmd } = resolveCodexLaunch();
     const args = [
       "exec",
       "--model",
@@ -203,7 +208,9 @@ export function runCodexExec(model, prompt, {
       args.push("-c", `${key}=${value}`);
     }
 
-    const child = spawn(command, args, {
+    const spawnCommand = viaCmd ? (process.env.ComSpec || "cmd.exe") : command;
+    const spawnArgs = viaCmd ? ["/d", "/c", command, ...args] : args;
+    const child = spawn(spawnCommand, spawnArgs, {
       env: { ...process.env },
       windowsHide: true,
       cwd,

@@ -18,6 +18,10 @@
   "managementFallbackModel": null,
   "screeningFallbackModel": null,
   "generalFallbackModel": null,
+  "memoryNuggetsFirst": true,
+  "autoresearch": false,
+  "autoresearchModel": "gpt-4o",
+  "autoresearchReasoningEffort": "medium",
 
   "minFeeActiveTvlRatio": 0.05,
   "minTvl": 10000,

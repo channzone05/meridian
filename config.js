@@ -98,6 +98,10 @@ export const config = {
     generalFallbackModel:    u.generalFallbackModel    ?? null,
   },
 
+  memory: {
+    nuggetsFirst: u.memoryNuggetsFirst ?? true,
+  },
+
   // ─── Web UI ───────────────────────────
   web: {
     port: parseInt(u.webPort || process.env.WEB_PORT || "3737", 10),
@@ -122,6 +126,7 @@ export const config = {
     declinePct: u.autoresearchDeclinePct ?? 15,
     cooldownCloses: u.autoresearchCooldownCloses ?? 5,
     llmModel: u.autoresearchModel ?? DEFAULT_MODEL,
+    reasoningEffort: u.autoresearchReasoningEffort ?? "medium",
   },
 
   // ─── Common Token Mints ────────────────
@@ -155,6 +160,7 @@ const SECTION_MAP = {
   schedule: new Set(Object.keys(config.schedule)),
   strategy: new Set(Object.keys(config.strategy)),
   llm: new Set(Object.keys(config.llm)),
+  memory: new Set(Object.keys(config.memory)),
   research: config.research ? new Set(Object.keys(config.research)) : new Set(),
 };
 

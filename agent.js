@@ -298,9 +298,12 @@ async function requestLightChatContent(messages, model) {
 export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHistory = [], agentType = "GENERAL", model = null) {
   const [portfolio, positions] = await Promise.all([getWalletBalances(), getMyPositions()]);
   const stateSummary = getStateSummary();
-  const lessons = getLessonsForPrompt({ agentType });
+  const rawLessons = getLessonsForPrompt({ agentType });
   const perfSummary = getPerformanceSummary();
   const memoryContext = getMemoryContext();
+  const lessons = agentType === "SCREENER" && config.memory.nuggetsFirst && memoryContext
+    ? null
+    : rawLessons;
   const signalWeights = agentType === "SCREENER" ? (getWeightsSummary() || null) : null;
   let systemPrompt = buildSystemPrompt(agentType, portfolio, positions, stateSummary, lessons, perfSummary, memoryContext, signalWeights);
 
