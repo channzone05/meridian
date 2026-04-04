@@ -360,6 +360,21 @@ export async function deployPosition({
     log("deploy", `Auto-calculated bins_below=${bins_below} from price_range_pct=${price_range_pct}% at bin_step=${resolvedBinStep}`);
   }
 
+  // ─── Hard guard: validate actual range % when bins passed directly ───
+  // Models sometimes pass raw bin counts from a different bin_step pool.
+  // At bin_step 25, 96 bins = 21% range (model probably thought bin_step 80 = 53%).
+  // Recalculate from the volatility table minimum (40% for moderate).
+  if (bins_below > 0 && !price_range_pct && resolvedBinStep) {
+    const stepPct = resolvedBinStep / 10000;
+    const actualRangePct = (1 - Math.pow(1 + stepPct, -bins_below)) * 100;
+    const MIN_RANGE_PCT = 35; // absolute floor — no position should be narrower
+    if (actualRangePct < MIN_RANGE_PCT) {
+      const correctedBins = calculateBinsForPriceRange(resolvedBinStep, MIN_RANGE_PCT);
+      log("deploy", `Range too narrow: ${bins_below} bins at bs${resolvedBinStep} = ${actualRangePct.toFixed(1)}% (min ${MIN_RANGE_PCT}%). Correcting to ${correctedBins} bins`);
+      bins_below = correctedBins;
+    }
+  }
+
   // ─── Detect auto-swap need ────────────────────────────────────
   // When the model wants two-sided spot but only has SOL:
   //   sol_split_pct is provided AND < 100, strategy is "spot", and no amount_x given.
