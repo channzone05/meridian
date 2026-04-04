@@ -3,7 +3,7 @@ import { homedir } from "os";
 import path from "path";
 import OpenAI from "openai";
 
-const DEFAULT_PROVIDER = "openrouter";
+const DEFAULT_PROVIDER = "codex";
 
 export function getLlmProvider() {
   return process.env.LLM_PROVIDER || DEFAULT_PROVIDER;

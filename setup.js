@@ -252,6 +252,14 @@ const screeningIntervalMin = await askNum(
 // ─── LLM ──────────────────────────────────────────────────────────────────────
 console.log("\n── LLM ───────────────────────────────────────");
 
+const defaultLlmProvider = e("llmProvider", process.env.LLM_PROVIDER || "codex");
+const llmProviderChoice = await askChoice("LLM provider:", [
+  { label: `Codex OAuth${defaultLlmProvider === "codex" ? " (default)" : ""}`, key: "codex" },
+  { label: `OpenRouter${defaultLlmProvider === "openrouter" ? " (default)" : ""}`, key: "openrouter" },
+  { label: `DeepSeek${defaultLlmProvider === "deepseek" ? " (default)" : ""}`, key: "deepseek" },
+]);
+const llmProvider = llmProviderChoice.key || defaultLlmProvider;
+
 const llmModel = await ask(
   "LLM model ID",
   e("llmModel", process.env.LLM_MODEL || "gpt-4o")
@@ -283,6 +291,7 @@ const userConfig = {
   outOfRangeWaitMinutes,
   managementIntervalMin,
   screeningIntervalMin,
+  llmProvider,
   llmModel,
   dryRun: dryRun === "true",
 };
@@ -309,6 +318,7 @@ Timeframe:    ${timeframe}
   OOR close:   after ${outOfRangeWaitMinutes} min
   Mgmt:        every ${managementIntervalMin} min
   Screening:   every ${screeningIntervalMin} min
+  Provider:    ${llmProvider}
   Model:       ${llmModel}
   Dry run:     ${dryRun}
 

@@ -11,6 +11,7 @@
   "managementIntervalMin": 10,
   "screeningIntervalMin": 30,
 
+  "llmProvider": "codex",
   "managementModel": "gpt-4o",
   "screeningModel": "gpt-4o",
   "generalModel": "gpt-4o",

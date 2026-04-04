@@ -14,6 +14,7 @@ const u = fs.existsSync(USER_CONFIG_PATH)
 // Apply wallet/RPC from user-config if not already in env
 if (u.rpcUrl)    process.env.RPC_URL            ||= u.rpcUrl;
 if (u.walletKey) process.env.WALLET_PRIVATE_KEY ||= u.walletKey;
+if (u.llmProvider) process.env.LLM_PROVIDER     ||= u.llmProvider;
 if (u.llmModel)  process.env.LLM_MODEL          ||= u.llmModel;
 if (u.dryRun !== undefined) process.env.DRY_RUN ||= String(u.dryRun);
 
