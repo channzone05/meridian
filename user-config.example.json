@@ -11,16 +11,12 @@
   "managementIntervalMin": 10,
   "screeningIntervalMin": 30,
 
-  "managementModel": "deepseek-chat",
-  "screeningModel": "deepseek-reasoner",
-  "generalModel": "deepseek-chat",
-  "codexPath": "C:\\path\\to\\codex.exe",
+  "managementModel": "gpt-4o",
+  "screeningModel": "gpt-4o",
+  "generalModel": "gpt-4o",
   "managementFallbackModel": null,
   "screeningFallbackModel": null,
   "generalFallbackModel": null,
-
-  "codexScreening": false,
-  "codexModel": "gpt-5.4",
 
   "minFeeActiveTvlRatio": 0.05,
   "minTvl": 10000,

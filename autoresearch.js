@@ -17,6 +17,7 @@ import {
   clearPromptSectionOverride,
 } from "./prompt.js";
 import { loadWeights } from "./signal-weights.js";
+import { getChatCompletionsEndpoint, getProviderApiKey } from "./llm-provider.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const AUTORESEARCH_FILE = path.join(__dirname, "autoresearch.json");
@@ -368,8 +369,9 @@ function logExperimentLesson(experiment, outcome, improvementPct) {
 // ─── LLM Call ────────────────────────────────────────────────
 
 async function callLLM(model, sectionName, lossCount, currentText, failureDesc) {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) throw new Error("OPENROUTER_API_KEY not set");
+  const baseURL = getChatCompletionsEndpoint();
+  const apiKey = getProviderApiKey();
+  if (!apiKey) throw new Error("LLM API key/token not available for autoresearch");
 
   const systemMsg = `You optimize prompts for an autonomous LP (Liquidity Provider) trading agent on Meteora/Solana DLMM. The agent uses these prompts as behavioral instructions. Your goal is to make small, surgical edits that reduce losses.
 
@@ -399,7 +401,7 @@ HYPOTHESIS: [one sentence explaining what you're changing and why]
 MODIFIED_TEXT:
 [full section text with your single change applied]`;
 
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  const response = await fetch(baseURL, {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${apiKey}`,
@@ -418,7 +420,7 @@ MODIFIED_TEXT:
 
   if (!response.ok) {
     const errText = await response.text().catch(() => "unknown");
-    throw new Error(`OpenRouter returned ${response.status}: ${errText}`);
+    throw new Error(`LLM provider returned ${response.status}: ${errText}`);
   }
 
   const data = await response.json();
