@@ -229,9 +229,17 @@ async function createCodexMessage(messages, model, agentType, step) {
   throw new Error("Codex CLI returned an invalid action");
 }
 
+const CLAUDE_EFFORT_BY_ROLE = {
+  SCREENER: "medium",
+  MANAGER: "low",
+  GENERAL: "medium",
+  AUTORESEARCH: "high",
+};
+
 async function createClaudeMessage(messages, model, agentType, step) {
   const prompt = buildCodexAgentPrompt(messages, agentType); // same JSON contract
-  const content = await runClaudeCli(model, prompt);
+  const effort = CLAUDE_EFFORT_BY_ROLE[agentType] || "medium";
+  const content = await runClaudeCli(model, prompt, { effort });
 
   if (!content) {
     throw new Error("Empty response from Claude CLI");
@@ -317,7 +325,7 @@ async function requestLightChatContent(messages, model) {
   }
 
   if (PROVIDER === "claude") {
-    return runClaudeCli(model, buildCodexLightChatPrompt(messages));
+    return runClaudeCli(model, buildCodexLightChatPrompt(messages), { effort: "low" });
   }
 
   const response = await client.chat.completions.create({

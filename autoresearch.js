@@ -426,6 +426,24 @@ MODIFIED_TEXT:
     };
   }
 
+  if (provider === "claude") {
+    const { runClaudeCli } = await import("./llm-provider.js");
+
+    const content = await runClaudeCli(model, `${systemMsg}\n\n${userMsg}`, {
+      effort: "high",
+    });
+
+    if (!content) throw new Error("Empty response from Claude CLI");
+
+    const hypothesisMatch = content.match(/HYPOTHESIS:\s*(.+?)(?:\n|$)/i);
+    const modifiedMatch = content.match(/MODIFIED_TEXT:\s*\n([\s\S]+)/i);
+
+    return {
+      hypothesis: hypothesisMatch?.[1]?.trim() || "Targeted modification",
+      modifiedText: modifiedMatch?.[1]?.trim() || null,
+    };
+  }
+
   const baseURL = getChatCompletionsEndpoint();
   const apiKey = getProviderApiKey();
   if (!apiKey) throw new Error("LLM API key/token not available for autoresearch");

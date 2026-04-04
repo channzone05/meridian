@@ -300,6 +300,7 @@ function resolveClaudeLaunch() {
 export function runClaudeCli(model, prompt, {
   timeoutMs = 180000,
   systemPrompt = null,
+  effort = null,
 } = {}) {
   return new Promise((resolve, reject) => {
     const stdoutChunks = [];
@@ -311,6 +312,10 @@ export function runClaudeCli(model, prompt, {
       "--model", model,
       "--no-session-persistence",
     ];
+
+    if (effort) {
+      args.push("--effort", effort);
+    }
 
     if (systemPrompt) {
       args.push("--system-prompt", systemPrompt);
