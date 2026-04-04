@@ -18,15 +18,40 @@ There is also an autoresearch subsystem that tests prompt changes after real clo
 
 ## LLM Providers
 
-Meridian supports three provider modes:
+Meridian supports four provider modes. Set via `LLM_PROVIDER` in `.env` or `llmProvider` in `user-config.json`:
 
-| Provider | How it works | Credentials |
-| --- | --- | --- |
-| `codex` | Runs model turns through `codex exec` | `codex login` on the machine |
-| `openrouter` | Direct HTTP API calls | `OPENROUTER_API_KEY` |
-| `deepseek` | Direct HTTP API calls | `DEEPSEEK_API_KEY` |
+| Provider | How it works | Auth | Cost |
+| --- | --- | --- | --- |
+| `claude` | Runs model turns through `claude -p` (Claude Code CLI) | OAuth login (`claude` CLI) | Uses your Claude Pro/Max subscription |
+| `codex` | Runs model turns through `codex exec` (Codex CLI) | OAuth login (`codex login`) | Uses your Codex/OpenAI subscription |
+| `openrouter` | Direct HTTP API calls to any model | `OPENROUTER_API_KEY` | Pay-per-token via OpenRouter |
+| `deepseek` | Direct HTTP API calls | `DEEPSEEK_API_KEY` | Pay-per-token via DeepSeek |
 
-Important: when `llmProvider` or `LLM_PROVIDER` is set to `codex`, Meridian uses the Codex CLI harness. It does not rely on direct `auth.json` API-token reuse.
+### Claude Provider (recommended)
+
+Uses `claude -p` (Claude Code print mode) with your existing Claude subscription. No API key billing — runs on your OAuth login. Supports per-role model selection:
+
+```json
+{
+  "llmProvider": "claude",
+  "screeningModel": "opus",
+  "managementModel": "haiku",
+  "generalModel": "sonnet",
+  "autoresearchModel": "opus"
+}
+```
+
+Available model aliases: `opus` (Opus 4.6), `sonnet` (Sonnet 4.6), `haiku` (Haiku 4.5).
+
+### Codex Provider
+
+Uses `codex exec` with your OpenAI/Codex subscription. Same CLI harness pattern as Claude but with OpenAI models.
+
+### OpenRouter Provider
+
+Uses the OpenRouter API to access any model (minimax, qwen, etc.). Requires `OPENROUTER_API_KEY` in `.env`. Good for cheap models like `minimax/minimax-m2.7` or free models like `qwen/qwen3.6-plus:free`.
+
+All providers use the same ReAct loop with your custom tools — the provider only affects which LLM processes the prompts.
 
 ## Architecture
 
@@ -54,44 +79,32 @@ LLM provider -> ReAct loop -> tools -> Meteora / Helius / Jupiter / LP Agent
 
 ### Install
 
-Recommended:
-
 ```bash
 git clone https://github.com/fciaf420/meridian.git
 cd meridian
-bash install.sh
+npm install
+cd web && npm install && npm run build && cd ..
 ```
 
-`install.sh` will:
+Nuggets (holographic memory) is bundled in `packages/nuggets/` — no separate repo needed.
 
-- clone `../nuggets` if missing
-- install and build `nuggets`
-- install Meridian dependencies
-- build the web UI in `web/dist`
+### Provider Setup
 
-Manual install:
+Choose your provider:
 
+**Claude (recommended — uses your Claude subscription):**
 ```bash
-git clone https://github.com/NeoVertex1/nuggets.git ../nuggets
-cd ../nuggets
-npm install
-npm run build
-
-cd ../meridian
-npm install
-cd web
-npm install
-npm run build
-cd ..
+# Make sure claude CLI is installed and logged in
+claude --version
 ```
 
-### Codex First-Run
-
-If you want to use your ChatGPT / Codex subscription as the LLM backend:
-
+**Codex (uses your OpenAI/Codex subscription):**
 ```bash
 codex login
 ```
+
+**OpenRouter (pay-per-token, any model):**
+Add `OPENROUTER_API_KEY=sk-or-...` to `.env`
 
 Then run:
 
@@ -179,7 +192,7 @@ So `LLM_MODEL` is only a global fallback. The main live settings are the per-rol
 Typical `.env`:
 
 ```env
-LLM_PROVIDER=codex
+LLM_PROVIDER=claude
 RPC_URL=https://...helius-rpc.com
 WALLET_PRIVATE_KEY=your_base58_key
 HELIUS_API_KEY=your_helius_key
@@ -193,8 +206,10 @@ DRY_RUN=true
 
 Notes:
 
+- `LLM_PROVIDER` can be `claude`, `codex`, `openrouter`, or `deepseek`
 - `OPENROUTER_API_KEY` is only needed when provider is `openrouter`
 - `DEEPSEEK_API_KEY` is only needed when provider is `deepseek`
+- `claude` and `codex` providers use OAuth login, no API key needed
 - `TELEGRAM_CHAT_ID` can be left empty; Meridian can register it automatically
 - `DRY_RUN=true` is the safest default until you validate behavior
 
