@@ -310,7 +310,6 @@ export function runClaudeCli(model, prompt, {
       "--output-format", "json",
       "--model", model,
       "--no-session-persistence",
-      "--bare",
     ];
 
     if (systemPrompt) {
