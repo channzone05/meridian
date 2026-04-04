@@ -14,7 +14,6 @@ const u = fs.existsSync(USER_CONFIG_PATH)
 if (u.rpcUrl)    process.env.RPC_URL            ||= u.rpcUrl;
 if (u.walletKey) process.env.WALLET_PRIVATE_KEY ||= u.walletKey;
 if (u.llmModel)  process.env.LLM_MODEL          ||= u.llmModel;
-if (u.codexPath) process.env.CODEX_PATH         ||= u.codexPath;
 if (u.dryRun !== undefined) process.env.DRY_RUN ||= String(u.dryRun);
 
 const isCodexProvider = (process.env.LLM_PROVIDER || "openrouter") === "codex";
@@ -95,8 +94,6 @@ export const config = {
     managementFallbackModel: u.managementFallbackModel ?? null,
     screeningFallbackModel:  u.screeningFallbackModel  ?? null,
     generalFallbackModel:    u.generalFallbackModel    ?? null,
-    codexScreening: u.codexScreening ?? false,
-    codexModel: u.codexModel ?? "gpt-5.4",
   },
 
   // ─── Web UI ───────────────────────────

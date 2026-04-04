@@ -38,8 +38,6 @@ export const CONFIG_KEY_MAP = {
   managementModel: ["llm", "managementModel"],
   screeningModel: ["llm", "screeningModel"],
   generalModel: ["llm", "generalModel"],
-  codexScreening: ["llm", "codexScreening"],
-  codexModel: ["llm", "codexModel"],
   binsBelow: ["strategy", "binsBelow"],
 };
 
