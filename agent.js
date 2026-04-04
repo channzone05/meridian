@@ -10,11 +10,26 @@ import { getLessonsForPrompt, getPerformanceSummary } from "./lessons.js";
 import { getMemoryContext } from "./memory.js";
 import { getWeightsSummary } from "./signal-weights.js";
 import { getLpOverviewSummary } from "./tools/lp-overview.js";
-import { createLlmClient, getDefaultModelForProvider } from "./llm-provider.js";
+import {
+  createLlmClient,
+  getDefaultModelForProvider,
+  getLlmProvider,
+  runCodexExec,
+} from "./llm-provider.js";
 
-const client = createLlmClient();
+const PROVIDER = getLlmProvider();
+const client = PROVIDER === "codex" ? null : createLlmClient(PROVIDER);
 
 const DEFAULT_MODEL = process.env.LLM_MODEL || getDefaultModelForProvider();
+const RETRYABLE = new Set([402, 408, 429, 502, 503, 504, 529]);
+const WRITE_TOOLS = new Set(["deploy_position", "close_position", "claim_fees", "swap_token"]);
+const TOOL_SUMMARIES = tools.map((tool) => ({
+  name: tool.function.name,
+  description: tool.function.description,
+  parameters: tool.function.parameters || { type: "object", properties: {} },
+}));
+const TOOL_SUMMARIES_TEXT = JSON.stringify(TOOL_SUMMARIES, null, 2);
+
 export function getScreenerModelLabel() {
   return config.llm.screeningModel;
 }
@@ -48,6 +63,231 @@ function getRoleFallbackModel(agentType, primaryModel) {
   return null;
 }
 
+function safeParseJson(raw, fallback = {}) {
+  if (!raw || typeof raw !== "string") return fallback;
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+
+function formatMessageContent(content) {
+  if (content == null) return "";
+  if (typeof content === "string") return content;
+
+  if (Array.isArray(content)) {
+    return content.map((part) => {
+      if (typeof part === "string") return part;
+      if (part?.text) return part.text;
+      return JSON.stringify(part);
+    }).join("\n");
+  }
+
+  return JSON.stringify(content, null, 2);
+}
+
+function findToolNameForResult(messages, index, toolCallId) {
+  for (let i = index - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message.role !== "assistant" || !Array.isArray(message.tool_calls)) continue;
+
+    const match = message.tool_calls.find((toolCall) => toolCall.id === toolCallId);
+    if (match?.function?.name) {
+      return match.function.name;
+    }
+  }
+
+  return null;
+}
+
+function buildCodexTranscript(messages) {
+  return messages.map((message, index) => {
+    if (message.role === "system") {
+      return `SYSTEM:\n${formatMessageContent(message.content)}`;
+    }
+
+    if (message.role === "user") {
+      return `USER:\n${formatMessageContent(message.content)}`;
+    }
+
+    if (message.role === "assistant" && Array.isArray(message.tool_calls)) {
+      const requestedTools = message.tool_calls.map((toolCall) => ({
+        name: toolCall.function?.name || "unknown_tool",
+        arguments: safeParseJson(toolCall.function?.arguments, {}),
+      }));
+
+      return `ASSISTANT TOOL REQUESTS:\n${JSON.stringify(requestedTools, null, 2)}`;
+    }
+
+    if (message.role === "assistant") {
+      return `ASSISTANT:\n${formatMessageContent(message.content)}`;
+    }
+
+    if (message.role === "tool") {
+      const toolName = findToolNameForResult(messages, index, message.tool_call_id) || "unknown_tool";
+      return `TOOL RESULT (${toolName}):\n${formatMessageContent(message.content)}`;
+    }
+
+    return `${String(message.role || "unknown").toUpperCase()}:\n${formatMessageContent(message.content)}`;
+  }).join("\n\n");
+}
+
+function buildCodexAgentPrompt(messages, agentType) {
+  const transcript = buildCodexTranscript(messages);
+
+  return [
+    `You are the ${agentType} reasoning engine for a JavaScript trading agent runner.`,
+    "Return raw JSON only. Do not wrap it in markdown fences or add any extra commentary.",
+    "Choose one of two actions only:",
+    '1. "respond" when you can fully answer the user with the information already available.',
+    '2. "tool_calls" when you need one or more listed tools to continue.',
+    "If you choose tool_calls, keep response null and provide exact JSON arguments for each tool call.",
+    "Never invent tool outputs, transaction results, or on-chain state.",
+    "Only use tool names from the available tools list.",
+    "Be conservative with write tools. Only call them when you intentionally want the runner to perform the real action.",
+    'Return exactly this shape: {"action":"respond","response":"...","tool_calls":[]} or {"action":"tool_calls","response":null,"tool_calls":[{"name":"tool_name","arguments":{}}]}',
+    `AVAILABLE TOOLS:\n${TOOL_SUMMARIES_TEXT}`,
+    `CONVERSATION TRANSCRIPT:\n${transcript}`,
+  ].join("\n\n");
+}
+
+function parseCodexJson(content) {
+  try {
+    return JSON.parse(content);
+  } catch {
+    const fencedMatch = content.match(/```json\s*([\s\S]*?)```/i) || content.match(/(\{[\s\S]*\})/);
+    if (!fencedMatch) {
+      throw new Error("Codex CLI returned non-JSON output");
+    }
+    return JSON.parse(fencedMatch[1]);
+  }
+}
+
+function normalizeCodexToolCalls(toolCalls, step) {
+  return toolCalls.map((toolCall, index) => {
+    const name = typeof toolCall?.name === "string" ? toolCall.name.trim() : "";
+    if (!name) {
+      throw new Error("Codex CLI returned a tool call without a name");
+    }
+
+    const args = toolCall.arguments && typeof toolCall.arguments === "object" && !Array.isArray(toolCall.arguments)
+      ? toolCall.arguments
+      : {};
+
+    return {
+      id: `codex-tool-${step + 1}-${index + 1}`,
+      type: "function",
+      function: {
+        name,
+        arguments: JSON.stringify(args),
+      },
+    };
+  });
+}
+
+async function createCodexMessage(messages, model, agentType, step) {
+  const prompt = buildCodexAgentPrompt(messages, agentType);
+  const content = await runCodexExec(model, prompt, {
+    cwd: process.cwd(),
+    sandbox: "read-only",
+    skipGitRepoCheck: true,
+    config: {
+      suppress_unstable_features_warning: "true",
+      model_reasoning_effort: agentType === "MANAGER" ? "high" : "medium",
+    },
+  });
+
+  if (!content) {
+    throw new Error("Empty response from Codex CLI");
+  }
+
+  const plan = parseCodexJson(content);
+  if (plan?.action === "respond") {
+    return {
+      role: "assistant",
+      content: typeof plan.response === "string" ? plan.response : "",
+    };
+  }
+
+  if (plan?.action === "tool_calls") {
+    const toolCalls = Array.isArray(plan.tool_calls) ? plan.tool_calls : [];
+    if (toolCalls.length === 0) {
+      throw new Error("Codex CLI requested tool_calls without any tools");
+    }
+
+    return {
+      role: "assistant",
+      content: null,
+      tool_calls: normalizeCodexToolCalls(toolCalls, step),
+    };
+  }
+
+  throw new Error("Codex CLI returned an invalid action");
+}
+
+async function createProviderMessage(messages, model, agentType, step) {
+  if (PROVIDER === "codex") {
+    return createCodexMessage(messages, model, agentType, step);
+  }
+
+  const response = await client.chat.completions.create({
+    model,
+    messages,
+    tools,
+    tool_choice: "auto",
+    temperature: config.llm.temperature,
+    max_tokens: config.llm.maxTokens,
+  });
+
+  if (!response?.choices?.length) {
+    const errCode = response?.error?.code || response?.error?.status;
+    if (RETRYABLE.has(errCode)) {
+      throw Object.assign(new Error(response.error?.message || `Provider error ${errCode}`), { status: errCode });
+    }
+
+    log("error", `Bad API response: ${JSON.stringify(response).slice(0, 200)}`);
+    throw new Error(`API returned no choices: ${response?.error?.message || JSON.stringify(response)}`);
+  }
+
+  return response.choices[0].message;
+}
+
+function buildCodexLightChatPrompt(messages) {
+  const transcript = buildCodexTranscript(messages);
+
+  return [
+    "You are answering a lightweight chat request for a DLMM trading agent.",
+    'If live on-chain data or tools are required, reply with exactly "[NEED_TOOLS]" and nothing else.',
+    "Otherwise answer directly, using only the provided transcript.",
+    `CONVERSATION TRANSCRIPT:\n${transcript}`,
+  ].join("\n\n");
+}
+
+async function requestLightChatContent(messages, model) {
+  if (PROVIDER === "codex") {
+    return runCodexExec(model, buildCodexLightChatPrompt(messages), {
+      cwd: process.cwd(),
+      sandbox: "read-only",
+      skipGitRepoCheck: true,
+      config: {
+        suppress_unstable_features_warning: "true",
+        model_reasoning_effort: "low",
+      },
+    });
+  }
+
+  const response = await client.chat.completions.create({
+    model,
+    messages,
+    temperature: config.llm.temperature,
+    max_tokens: config.llm.maxTokens,
+  });
+
+  return response.choices?.[0]?.message?.content || "";
+}
+
 /**
  * Core ReAct agent loop.
  *
@@ -56,7 +296,6 @@ function getRoleFallbackModel(agentType, primaryModel) {
  * @returns {string} - The agent's final text response
  */
 export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHistory = [], agentType = "GENERAL", model = null) {
-  // Build dynamic system prompt with current portfolio state
   const [portfolio, positions] = await Promise.all([getWalletBalances(), getMyPositions()]);
   const stateSummary = getStateSummary();
   const lessons = getLessonsForPrompt({ agentType });
@@ -65,15 +304,14 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
   const signalWeights = agentType === "SCREENER" ? (getWeightsSummary() || null) : null;
   let systemPrompt = buildSystemPrompt(agentType, portfolio, positions, stateSummary, lessons, perfSummary, memoryContext, signalWeights);
 
-  // Append verified on-chain LP performance from LP Agent API
   const lpSummary = await getLpOverviewSummary().catch(() => null);
   if (lpSummary) {
-    systemPrompt += `\n\nLP AGENT PERFORMANCE (real data from LP Agent API — use this for accurate PnL):\n${lpSummary}\n`;
+    systemPrompt += `\n\nLP AGENT PERFORMANCE (real data from LP Agent API - use this for accurate PnL):\n${lpSummary}\n`;
   }
 
   const messages = [
     { role: "system", content: systemPrompt },
-    ...sessionHistory,          // inject prior conversation turns
+    ...sessionHistory,
     { role: "user", content: goal },
   ];
   let consecutiveEmptyResponses = 0;
@@ -84,56 +322,39 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
     try {
       const activeModel = model || getRolePrimaryModel(agentType) || DEFAULT_MODEL;
       const fallbackModel = getRoleFallbackModel(agentType, activeModel);
-
-      // Retry up to 3 times on transient errors; optional configured fallback on 2nd failure
-      const RETRYABLE = new Set([402, 408, 429, 502, 503, 504, 529]);
-      let response;
+      let msg;
       let usedModel = activeModel;
+
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
-          response = await client.chat.completions.create({
-            model: usedModel,
-            messages,
-            tools,
-            tool_choice: "auto",
-            temperature: config.llm.temperature,
-            max_tokens: config.llm.maxTokens,
-          });
-          if (response.choices?.length) break;
-          // Response body error (some providers return errors inline)
-          const errCode = response.error?.code || response.error?.status;
-          if (RETRYABLE.has(errCode)) {
-            throw Object.assign(new Error(response.error?.message || `Provider error ${errCode}`), { status: errCode });
-          }
-          break; // non-retryable response error
+          msg = await createProviderMessage(messages, usedModel, agentType, step);
+          break;
         } catch (apiErr) {
           const status = apiErr.status || apiErr.statusCode;
-          if (!RETRYABLE.has(status)) throw apiErr;
-          // On 2nd failure, switch to configured fallback if one exists.
+          const retryable = PROVIDER === "codex" || RETRYABLE.has(status);
+          if (!retryable) throw apiErr;
+
           if (attempt >= 1 && fallbackModel && usedModel !== fallbackModel) {
             usedModel = fallbackModel;
-            log("agent", `Primary model failed (${status}), switching to fallback ${fallbackModel}`);
+            log("agent", `Primary model failed (${status || apiErr.message}), switching to fallback ${fallbackModel}`);
           } else {
             const wait = (attempt + 1) * 5000;
-            log("agent", `Provider error ${status}, retrying in ${wait / 1000}s (attempt ${attempt + 1}/3)`);
-            await new Promise((r) => setTimeout(r, wait));
+            log("agent", `Provider error ${status || apiErr.message}, retrying in ${wait / 1000}s (attempt ${attempt + 1}/3)`);
+            await sleep(wait);
           }
-          response = null; // ensure we retry
+          msg = null;
         }
       }
 
-      if (!response?.choices?.length) {
-        log("error", `Bad API response: ${JSON.stringify(response).slice(0, 200)}`);
-        throw new Error(`API returned no choices: ${response?.error?.message || JSON.stringify(response)}`);
+      if (!msg) {
+        throw new Error("Provider returned no assistant message");
       }
-      const msg = response.choices[0].message;
+
       messages.push(msg);
 
-      // If the model didn't call any tools, it's done
       if (!msg.tool_calls || msg.tool_calls.length === 0) {
-        // Hermes sometimes returns null content — pop the empty message and retry once
         if (!msg.content) {
-          messages.pop(); // remove the empty assistant message
+          messages.pop();
           consecutiveEmptyResponses += 1;
           if (consecutiveEmptyResponses >= 3) {
             throw new Error(`Model returned ${consecutiveEmptyResponses} empty responses in a row`);
@@ -141,6 +362,7 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
           log("agent", `Empty response, retrying (${consecutiveEmptyResponses}/3)...`);
           continue;
         }
+
         consecutiveEmptyResponses = 0;
         log("agent", "Final answer reached");
         log("agent", msg.content);
@@ -148,14 +370,9 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
       }
 
       consecutiveEmptyResponses = 0;
-      // On-chain write operations must run sequentially to avoid blockhash
-      // expiry from parallel Solana transactions competing for block space.
-      // Read-only tools can still run in parallel for speed.
-      const WRITE_TOOLS = new Set(["deploy_position", "close_position", "claim_fees", "swap_token"]);
-      const writeCalls = msg.tool_calls.filter(tc => WRITE_TOOLS.has(tc.function.name));
-      const readCalls = msg.tool_calls.filter(tc => !WRITE_TOOLS.has(tc.function.name));
+      const writeCalls = msg.tool_calls.filter((toolCall) => WRITE_TOOLS.has(toolCall.function.name));
+      const readCalls = msg.tool_calls.filter((toolCall) => !WRITE_TOOLS.has(toolCall.function.name));
 
-      // Run read-only calls in parallel
       const readResults = await Promise.all(readCalls.map(async (toolCall) => {
         const functionName = toolCall.function.name;
         let functionArgs;
@@ -173,7 +390,6 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
         };
       }));
 
-      // Run write calls sequentially
       const writeResults = [];
       for (const toolCall of writeCalls) {
         const functionName = toolCall.function.name;
@@ -192,22 +408,19 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
         });
       }
 
-      // Merge results in original call order
-      const resultMap = new Map([...readResults, ...writeResults].map(r => [r.tool_call_id, r]));
-      const toolResults = msg.tool_calls.map(tc => resultMap.get(tc.id));
+      const resultMap = new Map([...readResults, ...writeResults].map((result) => [result.tool_call_id, result]));
+      const toolResults = msg.tool_calls.map((toolCall) => resultMap.get(toolCall.id)).filter(Boolean);
 
       messages.push(...toolResults);
     } catch (error) {
       log("error", `Agent loop error at step ${step}: ${error.message}`);
 
-      // If it's a rate limit, wait and retry
       if (error.status === 429) {
         log("agent", "Rate limited, waiting 30s...");
         await sleep(30000);
         continue;
       }
 
-      // For other errors, break the loop
       throw error;
     }
   }
@@ -217,7 +430,7 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
 }
 
 /**
- * Lightweight chat — uses nuggets-cached context instead of fetching from chain.
+ * Lightweight chat - uses nuggets-cached context instead of fetching from chain.
  * First attempts a single LLM call with no tools. If the LLM says it needs tools
  * (by including "[NEED_TOOLS]" in its response), escalates to full agentLoop.
  *
@@ -228,11 +441,10 @@ export async function lightChat(goal, sessionHistory = [], model = null) {
   const memoryContext = getMemoryContext();
   const perfSummary = getPerformanceSummary();
 
-  // Build a lightweight context from cached/local data only — no RPC calls
   const contextParts = [
-    `You are a DLMM liquidity agent assistant. Answer the user's question using the context below.`,
-    `If you need LIVE on-chain data (current prices, exact PnL, execute transactions) that isn't in the context, respond with exactly "[NEED_TOOLS]" and nothing else.`,
-    `For general questions, explanations, strategy discussion, or anything answerable from context — just answer directly.`,
+    "You are a DLMM liquidity agent assistant. Answer the user's question using the context below.",
+    'If you need LIVE on-chain data (current prices, exact PnL, execute transactions) that is not in the context, respond with exactly "[NEED_TOOLS]" and nothing else.',
+    "For general questions, explanations, strategy discussion, or anything answerable from context - just answer directly.",
   ];
 
   if (stateSummary) contextParts.push(`\nCURRENT STATE:\n${stateSummary}`);
@@ -241,7 +453,6 @@ export async function lightChat(goal, sessionHistory = [], model = null) {
     contextParts.push(`\nPERFORMANCE: ${perfSummary.total_positions_closed} closed, win rate ${perfSummary.win_rate_pct}%, avg PnL ${perfSummary.avg_pnl_pct}%`);
   }
 
-  // Append verified on-chain LP performance from LP Agent API
   const lpSummary = await getLpOverviewSummary().catch(() => null);
   if (lpSummary) {
     contextParts.push(`\nLP AGENT PERFORMANCE (verified on-chain data):\n${lpSummary}`);
@@ -259,14 +470,7 @@ export async function lightChat(goal, sessionHistory = [], model = null) {
 
   for (const tryModel of modelsToTry) {
     try {
-      const response = await client.chat.completions.create({
-        model: tryModel,
-        messages,
-        temperature: config.llm.temperature,
-        max_tokens: config.llm.maxTokens,
-      });
-
-      const content = response.choices?.[0]?.message?.content;
+      const content = await requestLightChatContent(messages, tryModel);
       if (!content || content.trim().includes("[NEED_TOOLS]")) {
         log("agent", "Light chat escalating to full agent loop");
         return agentLoop(goal, config.llm.maxSteps, sessionHistory, "GENERAL", model);
@@ -274,13 +478,14 @@ export async function lightChat(goal, sessionHistory = [], model = null) {
 
       log("agent", `Light chat answered directly (${tryModel})`);
       return { content, userMessage: goal };
-    } catch (e) {
-      const status = e.status || e.statusCode;
-      if (fallbackModel && tryModel !== fallbackModel && (status === 402 || status === 429 || status === 502 || status === 503 || status === 504 || status === 529)) {
-        log("agent", `Light chat primary failed (${status}), trying fallback ${fallbackModel}`);
+    } catch (error) {
+      const status = error.status || error.statusCode;
+      const retryable = PROVIDER === "codex" || RETRYABLE.has(status);
+      if (fallbackModel && tryModel !== fallbackModel && retryable) {
+        log("agent", `Light chat primary failed (${status || error.message}), trying fallback ${fallbackModel}`);
         continue;
       }
-      log("agent", `Light chat failed (${e.message}), falling back to full agent loop`);
+      log("agent", `Light chat failed (${error.message}), falling back to full agent loop`);
       return agentLoop(goal, config.llm.maxSteps, sessionHistory, "GENERAL", model);
     }
   }
