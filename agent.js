@@ -15,10 +15,12 @@ import {
   getDefaultModelForProvider,
   getLlmProvider,
   runCodexExec,
+  runClaudeCli,
 } from "./llm-provider.js";
 
 const PROVIDER = getLlmProvider();
-const client = PROVIDER === "codex" ? null : createLlmClient(PROVIDER);
+const CLI_PROVIDERS = new Set(["codex", "claude"]);
+const client = CLI_PROVIDERS.has(PROVIDER) ? null : createLlmClient(PROVIDER);
 
 const DEFAULT_MODEL = process.env.LLM_MODEL || getDefaultModelForProvider();
 const RETRYABLE = new Set([402, 408, 429, 502, 503, 504, 529]);
@@ -227,9 +229,45 @@ async function createCodexMessage(messages, model, agentType, step) {
   throw new Error("Codex CLI returned an invalid action");
 }
 
+async function createClaudeMessage(messages, model, agentType, step) {
+  const prompt = buildCodexAgentPrompt(messages, agentType); // same JSON contract
+  const content = await runClaudeCli(model, prompt);
+
+  if (!content) {
+    throw new Error("Empty response from Claude CLI");
+  }
+
+  const plan = parseCodexJson(content); // same JSON format
+  if (plan?.action === "respond") {
+    return {
+      role: "assistant",
+      content: typeof plan.response === "string" ? plan.response : "",
+    };
+  }
+
+  if (plan?.action === "tool_calls") {
+    const toolCalls = Array.isArray(plan.tool_calls) ? plan.tool_calls : [];
+    if (toolCalls.length === 0) {
+      throw new Error("Claude CLI requested tool_calls without any tools");
+    }
+
+    return {
+      role: "assistant",
+      content: null,
+      tool_calls: normalizeCodexToolCalls(toolCalls, step),
+    };
+  }
+
+  throw new Error("Claude CLI returned an invalid action");
+}
+
 async function createProviderMessage(messages, model, agentType, step) {
   if (PROVIDER === "codex") {
     return createCodexMessage(messages, model, agentType, step);
+  }
+
+  if (PROVIDER === "claude") {
+    return createClaudeMessage(messages, model, agentType, step);
   }
 
   const response = await client.chat.completions.create({
@@ -276,6 +314,10 @@ async function requestLightChatContent(messages, model) {
         model_reasoning_effort: "low",
       },
     });
+  }
+
+  if (PROVIDER === "claude") {
+    return runClaudeCli(model, buildCodexLightChatPrompt(messages));
   }
 
   const response = await client.chat.completions.create({

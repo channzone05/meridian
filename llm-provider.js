@@ -11,7 +11,9 @@ export function getLlmProvider() {
 }
 
 export function getDefaultModelForProvider(provider = getLlmProvider()) {
-  return provider === "codex" ? "gpt-4o" : "openai/gpt-5.4-nano";
+  if (provider === "codex") return "gpt-4o";
+  if (provider === "claude") return "sonnet";
+  return "openai/gpt-5.4-nano";
 }
 
 export function readCodexOAuthToken() {
@@ -39,6 +41,9 @@ export function getProviderApiKey(provider = getLlmProvider()) {
   if (provider === "codex") {
     throw new Error("Codex provider uses the Codex CLI harness, not direct API key access.");
   }
+  if (provider === "claude") {
+    throw new Error("Claude provider uses the Claude CLI (OAuth), not direct API key access.");
+  }
   if (provider === "deepseek") return process.env.DEEPSEEK_API_KEY;
   return process.env.OPENROUTER_API_KEY;
 }
@@ -46,6 +51,9 @@ export function getProviderApiKey(provider = getLlmProvider()) {
 export function getProviderClientConfig(provider = getLlmProvider()) {
   if (provider === "codex") {
     throw new Error("Codex provider uses the Codex CLI harness, not OpenAI client config.");
+  }
+  if (provider === "claude") {
+    throw new Error("Claude provider uses the Claude CLI (OAuth), not OpenAI client config.");
   }
 
   if (provider === "deepseek") {
@@ -64,6 +72,9 @@ export function getProviderClientConfig(provider = getLlmProvider()) {
 export function getChatCompletionsEndpoint(provider = getLlmProvider()) {
   if (provider === "codex") {
     throw new Error("Codex provider uses the Codex CLI harness, not direct chat completions.");
+  }
+  if (provider === "claude") {
+    throw new Error("Claude provider uses the Claude CLI (OAuth), not direct chat completions.");
   }
   if (provider === "deepseek") return "https://api.deepseek.com/chat/completions";
   return "https://openrouter.ai/api/v1/chat/completions";
@@ -240,6 +251,117 @@ export function runCodexExec(model, prompt, {
       }
 
       resolve(extractCodexMessage(output));
+    });
+
+    child.on("error", (err) => reject(err));
+  });
+}
+
+function resolveClaudeLaunch() {
+  const configured = process.env.CLAUDE_PATH?.trim();
+  if (configured) {
+    if (process.platform === "win32") {
+      if (/\.exe$/i.test(configured)) {
+        return { command: configured, viaCmd: false };
+      }
+
+      const siblingExe = configured.replace(/\.(cmd|bat|ps1)$/i, ".exe");
+      if (siblingExe !== configured && existsSync(siblingExe)) return { command: siblingExe, viaCmd: false };
+
+      const claudeExe = findExecutableOnPath("claude.exe");
+      if (claudeExe) return { command: claudeExe, viaCmd: false };
+
+      if (/\.(cmd|bat)$/i.test(configured)) {
+        return { command: configured, viaCmd: true };
+      }
+    }
+
+    return { command: configured, viaCmd: false };
+  }
+
+  if (process.platform === "win32") {
+    const claudeExe = findExecutableOnPath("claude.exe");
+    if (claudeExe) return { command: claudeExe, viaCmd: false };
+
+    const claudeAny = findExecutableOnPath("claude");
+    if (claudeAny && /\.exe$/i.test(claudeAny)) return { command: claudeAny, viaCmd: false };
+
+    const claudeCmd = findExecutableOnPath("claude.cmd");
+    if (claudeCmd) {
+      const siblingExe = claudeCmd.replace(/\.cmd$/i, ".exe");
+      if (siblingExe !== claudeCmd && existsSync(siblingExe)) return { command: siblingExe, viaCmd: false };
+      return { command: claudeCmd, viaCmd: true };
+    }
+  }
+
+  return { command: "claude", viaCmd: false };
+}
+
+export function runClaudeCli(model, prompt, {
+  timeoutMs = 180000,
+  systemPrompt = null,
+} = {}) {
+  return new Promise((resolve, reject) => {
+    const stdoutChunks = [];
+    const stderrChunks = [];
+    const { command, viaCmd } = resolveClaudeLaunch();
+    const args = [
+      "-p",
+      "--output-format", "json",
+      "--model", model,
+      "--no-session-persistence",
+      "--bare",
+    ];
+
+    if (systemPrompt) {
+      args.push("--system-prompt", systemPrompt);
+    }
+
+    const spawnCommand = viaCmd ? (process.env.ComSpec || "cmd.exe") : command;
+    const spawnArgs = viaCmd ? ["/d", "/c", command, ...args] : args;
+    const child = spawn(spawnCommand, spawnArgs, {
+      env: { ...process.env },
+      windowsHide: true,
+    });
+
+    child.stdin.end(prompt, "utf8");
+
+    let killed = false;
+    const killTimer = setTimeout(() => {
+      killed = true;
+      killChildProcess(child);
+      reject(new Error(`Claude CLI timed out after ${timeoutMs / 1000}s`));
+    }, timeoutMs);
+
+    child.stdout.on("data", (data) => stdoutChunks.push(data.toString()));
+    child.stderr.on("data", (data) => stderrChunks.push(data.toString()));
+
+    child.on("close", (code) => {
+      clearTimeout(killTimer);
+      if (killed) return;
+
+      const output = stdoutChunks.join("");
+      const stderr = stderrChunks.join("").trim();
+      if (code !== 0) {
+        reject(new Error(stderr || output.trim() || `Claude CLI exited with code ${code}`));
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(output.trim());
+        if (parsed.type === "result" && parsed.result) {
+          resolve(parsed.result);
+        } else {
+          reject(new Error(`Unexpected Claude CLI response: ${JSON.stringify(parsed)}`));
+        }
+      } catch {
+        // If JSON parsing fails, return the raw output as a fallback.
+        if (output.trim()) {
+          resolve(output.trim());
+        } else {
+          reject(new Error(stderr || "Claude CLI returned empty output"));
+        }
+      }
     });
 
     child.on("error", (err) => reject(err));
