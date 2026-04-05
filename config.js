@@ -129,6 +129,15 @@ export const config = {
     reasoningEffort: u.autoresearchReasoningEffort ?? "medium",
   },
 
+  // ─── Knowledge Base ─────────────��──────
+  knowledgeBase: {
+    enabled:                   u.knowledgeBase?.enabled ?? true,
+    dir:                       u.knowledgeBase?.dir ?? "./knowledge",
+    autoFile:                  u.knowledgeBase?.autoFile ?? true,
+    healthCheckIntervalHours:  u.knowledgeBase?.healthCheckIntervalHours ?? 12,
+    maxArticles:               u.knowledgeBase?.maxArticles ?? 500,
+  },
+
   // ─── Common Token Mints ────────────────
   tokens: {
     SOL:  "So11111111111111111111111111111111111111112",
@@ -161,6 +170,7 @@ const SECTION_MAP = {
   strategy: new Set(Object.keys(config.strategy)),
   llm: new Set(Object.keys(config.llm)),
   memory: new Set(Object.keys(config.memory)),
+  knowledgeBase: new Set(Object.keys(config.knowledgeBase)),
   research: config.research ? new Set(Object.keys(config.research)) : new Set(),
 };
 

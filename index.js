@@ -32,6 +32,7 @@ import {
 import { startServer } from "./server.js";
 import { getScreeningThresholdSummary, getStartupMode } from "./runtime-helpers.js";
 import { getRangeSelectionText } from "./prompt.js";
+import { shouldFileObservations, getKbStats } from "./knowledge-base.js";
 
 log("startup", "DLMM LP Agent starting...");
 log("startup", `Mode: ${process.env.DRY_RUN === "true" ? "DRY RUN" : "LIVE"}`);
@@ -305,6 +306,14 @@ Example: "AVOID: Entering NOTHING-SOL during 4h +70% pump — reversal risk is h
       // Promote high-hit nugget facts to MEMORY.md
       maybePromote();
       checkCapacity();
+      // File observations to knowledge base (throttled, max once/hour)
+      try {
+        const kbGoal = shouldFileObservations();
+        if (kbGoal) {
+          log("kb", "Filing observations to knowledge base...");
+          await lightChat(kbGoal, []).catch(e => log("kb", `Filing skipped: ${e.message}`));
+        }
+      } catch { /* kb filing is best-effort */ }
     }
   });
 
@@ -565,7 +574,28 @@ ${getRangeSelectionText(deployAmount, currentBalance?.sol)}
     await maybeRunMissedBriefing();
   }, { timezone: 'UTC' });
 
-  _cronTasks = [mgmtTask, screenTask, briefingTask, briefingWatchdog];
+  // Knowledge base health check (every N hours, configurable)
+  const kbHealthHours = config.knowledgeBase?.healthCheckIntervalHours || 12;
+  const kbHealthTask = cron.schedule(`0 */${Math.max(1, kbHealthHours)} * * *`, async () => {
+    if (!config.knowledgeBase?.enabled) return;
+    const stats = getKbStats();
+    if (stats.totalArticles < 3) return; // Not enough articles to lint
+    if (isBusy() || isManagementBusy() || isScreeningBusy()) return;
+
+    log("cron", "Starting KB health check");
+    try {
+      const { content } = await agentLoop(
+        `KNOWLEDGE BASE HEALTH CHECK: Read kb_read("INDEX.md") to see all articles. Then review 3-5 articles that seem most likely to have issues (oldest, most cross-referenced, or covering active pools). Look for: contradictions between articles, stale data that no longer matches recent performance, missing cross-references ([[concept]] links), and articles that could be merged or split. Fix any issues found using kb_write. Report what you checked and any changes made.`,
+        10, [], "GENERAL", config.llm.generalModel
+      );
+      emit("cycle:kb_health", { report: content });
+      log("cron", "KB health check complete");
+    } catch (e) {
+      log("cron_error", `KB health check failed: ${e.message}`);
+    }
+  }, { timezone: 'UTC' });
+
+  _cronTasks = [mgmtTask, screenTask, briefingTask, briefingWatchdog, kbHealthTask];
 
   // Start lightweight PnL watcher (sub-minute interval, no LLM)
   startPnlWatcher(config.schedule.pnlWatcherIntervalSec);

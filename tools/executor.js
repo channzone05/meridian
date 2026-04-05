@@ -31,6 +31,7 @@ const USER_CONFIG_PATH = path.join(__dirname, "../user-config.json");
 import { log, logAction } from "../logger.js";
 import { rememberFact, recallMemory, forgetFact } from "../memory.js";
 import { emit } from "../notifier.js";
+import { kbRead, kbWrite, kbSearch, kbList, kbDelete, kbMigrate, kbGetStats, kbRebuildIndexes } from "./knowledge-base-tools.js";
 
 // Registered by index.js so update_config can restart cron jobs when intervals change
 let _cronRestarter = null;
@@ -126,6 +127,14 @@ const toolMap = {
   remember_fact: ({ nugget, key, value }) => rememberFact(nugget, key, value),
   recall_memory: ({ query, nugget }) => recallMemory(query, nugget),
   forget_fact: ({ nugget, key }) => forgetFact(nugget, key),
+  kb_read: kbRead,
+  kb_write: kbWrite,
+  kb_search: kbSearch,
+  kb_list: kbList,
+  kb_delete: kbDelete,
+  kb_migrate: kbMigrate,
+  kb_stats: kbGetStats,
+  kb_rebuild_indexes: kbRebuildIndexes,
   clear_lessons: ({ mode, keyword }) => {
     if (mode === "all") {
       const n = clearAllLessons();
@@ -224,6 +233,9 @@ const WRITE_TOOLS = new Set([
   "claim_fees",
   "close_position",
   "swap_token",
+  "kb_write",
+  "kb_delete",
+  "kb_migrate",
 ]);
 
 /**

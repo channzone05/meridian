@@ -14,6 +14,7 @@
  * @returns {string} - Complete system prompt
  */
 import { config } from "./config.js";
+import { getKbSummaryForPrompt } from "./knowledge-base.js";
 
 // ─── Section Override System (used by autoresearch) ──────────
 const _sectionOverrides = {};
@@ -275,6 +276,8 @@ TWO-SIDED SPOT WITH AUTO-SWAP:
 - For two-sided spot: pass sol_split_pct (your conviction level). 100 = pure SOL (same as bid_ask). 80 = mostly SOL, 20% token exposure. 50 = equal. 25 = mostly token (bullish). The executor auto-swaps the token portion.
 - You do NOT need to pre-buy tokens. Just provide total SOL as amount_y + sol_split_pct. The executor handles the Jupiter swap and deploys both sides.
 - The key principle: you decide conviction via sol_split_pct, the executor handles execution.
+
+KNOWLEDGE BASE: For complex questions about performance, strategy patterns, or historical analysis, use kb_read (start with INDEX.md) and kb_search to find relevant compiled articles. The knowledge base contains synthesized analysis beyond raw data. Use kb_write to file new observations or analysis results.
 `;
   }
 
@@ -303,6 +306,18 @@ ${lessons}
  HOLOGRAPHIC MEMORY
 ═══════════════════════════════════════════
 ${memoryContext}
+`;
+  }
+
+  // Knowledge base context (if enabled and populated)
+  let kbSummary = null;
+  try { kbSummary = getKbSummaryForPrompt(); } catch { /* kb summary is best-effort */ }
+  if (kbSummary) {
+    prompt += `
+═══════════════════════════════════════════
+ KNOWLEDGE BASE
+═══════════════════════════════════════════
+${kbSummary}
 `;
   }
 

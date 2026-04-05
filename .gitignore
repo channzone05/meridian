@@ -17,6 +17,9 @@ pool-memory.json
 token-blacklist.json
 strategy-library.json
 
+# Knowledge base (LLM-maintained, user-specific)
+knowledge/
+
 # Logs
 logs/
 

@@ -1091,4 +1091,120 @@ BAD signals: empty/null, pure hype only, completely generic, copy-paste of anoth
     }
   },
 
+  // ─── Knowledge Base ──────────────────────────────────────────
+
+  {
+    type: "function",
+    function: {
+      name: "kb_read",
+      description: `Read an article from the knowledge base. Pass "INDEX.md" (or omit path) to read the index — a table of contents of all articles with summaries. Pass "CONCEPTS.md" to read recurring themes. Pass a specific path (e.g. "pools/bonk-sol.md") to read a full article.
+TIP: Always read INDEX.md first to find what you need, then drill into specific articles.`,
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Article path within knowledge/ (e.g. 'INDEX.md', 'pools/bonk-sol.md'). Defaults to INDEX.md." }
+        }
+      }
+    }
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "kb_write",
+      description: `Write or update a markdown article in the knowledge base. Use this to file observations, compile analysis, or update existing articles.
+Articles should be concise, interlinked using [[concept]] syntax, and organized into categories: pools/, strategies/, patterns/, lessons/, performance/.
+The INDEX.md is auto-updated when you write an article.
+
+Examples:
+- kb_write("pools/bonk-sol.md", "# Pool: BONK-SOL\\n\\n3 deploys, avg +4.2%...")
+- kb_write("patterns/evening-volume.md", "# Evening Volume Dropoff\\n\\nObserved [[volume]] drops after 8pm UTC...")`,
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Article path within knowledge/ (e.g. 'pools/bonk-sol.md')" },
+          content: { type: "string", description: "Full markdown content of the article" }
+        },
+        required: ["path", "content"]
+      }
+    }
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "kb_search",
+      description: `Full-text search across all knowledge base articles. Returns matching file paths with context lines.
+Use this to find articles related to a topic before reading them in full.
+
+Examples:
+- kb_search("BONK") → finds all articles mentioning BONK
+- kb_search("trailing take profit") → finds strategy articles about trailing TP`,
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Text to search for across all articles" }
+        },
+        required: ["query"]
+      }
+    }
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "kb_list",
+      description: "List all knowledge base articles, optionally filtered by category. Shows title, summary, word count, and last updated date.",
+      parameters: {
+        type: "object",
+        properties: {
+          category: { type: "string", description: "Filter by category: pools, strategies, patterns, lessons, performance" },
+          limit: { type: "number", description: "Max articles to return (default 50)" }
+        }
+      }
+    }
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "kb_delete",
+      description: "Delete an article from the knowledge base. Also removes its INDEX.md entry.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Article path to delete (e.g. 'pools/old-pool.md')" }
+        },
+        required: ["path"]
+      }
+    }
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "kb_migrate",
+      description: `One-time migration: converts existing lessons.json, pool-memory.json, and nuggets data into initial knowledge base articles. Safe to re-run — skips articles that already exist. Also rebuilds INDEX.md and CONCEPTS.md.`,
+      parameters: { type: "object", properties: {} }
+    }
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "kb_stats",
+      description: "Get knowledge base statistics: article count, word count, categories breakdown, and last updated timestamp.",
+      parameters: { type: "object", properties: {} }
+    }
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "kb_rebuild_indexes",
+      description: "Rebuild INDEX.md and CONCEPTS.md from scratch by scanning all articles. Use after bulk writes or when indexes become out of sync.",
+      parameters: { type: "object", properties: {} }
+    }
+  },
+
 ];
