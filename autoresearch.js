@@ -172,17 +172,51 @@ async function analyzeAndGenerate(perfData, lessons, cfg, state) {
     return;
   }
 
-  // 4. Generate modification via cheap LLM
+  // 4. Generate modification via LLM with KB context
   const failures = sectionLosses[worstSection];
   const failureDesc = failures
-    .map(f => `- ${f.pool_name || "unknown"}: PnL ${f.pnl_pct}%, reason: ${f.close_reason || "unknown"}`)
+    .map(f => `- ${f.pool_name || "unknown"}: PnL ${f.pnl_pct}%, reason: ${f.close_reason || "unknown"}, strategy: ${f.strategy || "?"}, volatility: ${f.volatility || "?"}`)
     .join("\n");
+
+  // Search KB for patterns related to the failing pools/strategies
+  let kbContext = "";
+  try {
+    const { searchArticles, readArticle } = await import("./knowledge-base.js");
+    const kbQueries = new Set();
+    for (const f of failures) {
+      if (f.pool_name) kbQueries.add(f.pool_name.replace(/-SOL$/, ""));
+      if (f.strategy) kbQueries.add(f.strategy);
+      if (f.close_reason?.includes("OOR")) kbQueries.add("oor");
+    }
+    kbQueries.add(worstSection.replace("_", " "));
+
+    const seen = new Set();
+    const kbSnippets = [];
+    for (const q of kbQueries) {
+      const results = searchArticles(q);
+      for (const r of (results.results || []).slice(0, 3)) {
+        if (seen.has(r.path)) continue;
+        seen.add(r.path);
+        const article = readArticle(r.path);
+        if (article?.content) {
+          kbSnippets.push(`--- ${r.path} ---\n${article.content.slice(0, 500)}`);
+        }
+        if (kbSnippets.length >= 8) break;
+      }
+      if (kbSnippets.length >= 8) break;
+    }
+    if (kbSnippets.length > 0) {
+      kbContext = `\n\nKNOWLEDGE BASE CONTEXT (relevant articles from prior experience):\n${kbSnippets.join("\n\n")}`;
+    }
+  } catch (e) {
+    log("autoresearch", `KB lookup failed (non-fatal): ${e.message}`);
+  }
 
   const llmModel = cfg.autoresearch?.llmModel ?? getDefaultModelForProvider(getLlmProvider());
   let hypothesis, modifiedText;
 
   try {
-    const result = await callLLM(llmModel, worstSection, worstCount, currentText, failureDesc);
+    const result = await callLLM(llmModel, worstSection, worstCount, currentText, failureDesc + kbContext);
     hypothesis = result.hypothesis;
     modifiedText = result.modifiedText;
   } catch (e) {
