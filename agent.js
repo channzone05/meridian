@@ -402,20 +402,19 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
       // If primary provider exhausted all retries, fall back to DeepSeek
       if (!msg) {
         const DEEPSEEK_FALLBACK_MODELS = {
-          SCREENER: "deepseek/deepseek-v3.2-speciale",
+          SCREENER: "deepseek-reasoner",
           MANAGER: "deepseek-chat",
           GENERAL: "deepseek-chat",
-          AUTORESEARCH: "deepseek/deepseek-v3.2-speciale",
+          AUTORESEARCH: "deepseek-reasoner",
         };
         const dsModel = DEEPSEEK_FALLBACK_MODELS[agentType] || "deepseek-chat";
-        const useOpenRouter = dsModel.includes("/");
 
-        const fallbackKey = useOpenRouter ? process.env.OPENROUTER_API_KEY : process.env.DEEPSEEK_API_KEY;
+        const fallbackKey = process.env.DEEPSEEK_API_KEY;
         if (fallbackKey) {
           try {
-            log("agent", `All ${PROVIDER} retries exhausted — falling back to ${dsModel} via ${useOpenRouter ? "OpenRouter" : "DeepSeek"}`);
+            log("agent", `All ${PROVIDER} retries exhausted — falling back to ${dsModel} via DeepSeek API`);
             const fallbackClient = new OpenAI({
-              baseURL: useOpenRouter ? "https://openrouter.ai/api/v1" : "https://api.deepseek.com/v1",
+              baseURL: "https://api.deepseek.com/v1",
               apiKey: fallbackKey,
             });
             const dsResponse = await fallbackClient.chat.completions.create({
@@ -428,10 +427,10 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
             });
             if (dsResponse?.choices?.length) {
               msg = dsResponse.choices[0].message;
-              log("agent", `Fallback succeeded (model: ${dsModel})`);
+              log("agent", `DeepSeek fallback succeeded (model: ${dsModel})`);
             }
           } catch (dsErr) {
-            log("agent", `Fallback also failed: ${dsErr.message}`);
+            log("agent", `DeepSeek fallback also failed: ${dsErr.message}`);
           }
         }
       }
