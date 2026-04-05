@@ -14,6 +14,7 @@ import { config, reloadScreeningThresholds } from "./config.js";
 import { recordPoolDeploy } from "./pool-memory.js";
 import { rememberPoolOutcome, rememberStrategy } from "./memory.js";
 import { recalculateWeights } from "./signal-weights.js";
+import { filePositionClose } from "./knowledge-base.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const USER_CONFIG_PATH = path.join(__dirname, "user-config.json");
@@ -178,6 +179,13 @@ export async function recordPerformance(perf) {
     }
   } catch (e) {
     log("memory", `Failed to store in nuggets: ${e.message}`);
+  }
+
+  // File position close to knowledge base (direct write, no LLM)
+  try {
+    filePositionClose({ ...perf, pnl_pct, minutes_in_range: perf.minutes_in_range });
+  } catch (e) {
+    log("kb", `Failed to file position close to KB: ${e.message}`);
   }
 
   // Evolve thresholds every 5 closed positions (compare against stored counter, not modulo)

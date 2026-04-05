@@ -1,4 +1,6 @@
 import "dotenv/config";
+import fs from "fs";
+import path from "path";
 import cron from "node-cron";
 import readline from "readline";
 import { agentLoop, lightChat, getScreenerModelLabel, screenerLoop } from "./agent.js";
@@ -32,6 +34,7 @@ import {
 import { startServer } from "./server.js";
 import { getScreeningThresholdSummary, getStartupMode } from "./runtime-helpers.js";
 import { getRangeSelectionText } from "./prompt.js";
+import { shouldFileObservations, getKbStats, migrateFromJson, kbRecallForScreening, kbRecallForManagement, fileScreeningResult } from "./knowledge-base.js";
 
 log("startup", "DLMM LP Agent starting...");
 log("startup", `Mode: ${process.env.DRY_RUN === "true" ? "DRY RUN" : "LIVE"}`);
@@ -42,6 +45,20 @@ initMemory();
 
 // One-time lesson dedup on startup
 deduplicateLessons();
+
+// Auto-migrate existing JSON data to knowledge base on first run
+if (config.knowledgeBase?.enabled) {
+  const kbDir = config.knowledgeBase.dir || "./knowledge";
+  if (!fs.existsSync(path.join(kbDir, "INDEX.md"))) {
+    const hasData = fs.existsSync("./lessons.json") || fs.existsSync("./pool-memory.json");
+    if (hasData) {
+      log("kb", "Knowledge base not found — running initial migration...");
+      migrateFromJson().then(r => {
+        log("kb", `Initial migration complete: ${r.created} articles created, ${r.skipped} skipped`);
+      }).catch(e => log("kb", `Initial migration failed: ${e.message}`));
+    }
+  }
+}
 
 const TP_PCT  = config.management.takeProfitFeePct;
 const DEPLOY  = config.management.deployAmountSol;
@@ -243,9 +260,17 @@ function startCronJobs() {
         }
       } catch { /* best-effort */ }
 
+      // Pre-load KB articles relevant to open positions
+      let kbContext = "";
+      try {
+        const pos = await getMyPositions().catch(() => null);
+        const kbHints = kbRecallForManagement(pos?.positions || []);
+        if (kbHints) kbContext = `\n\n${kbHints}`;
+      } catch { /* best-effort */ }
+
       const pnlUnit = config.management.pnlUnit?.toUpperCase() || "SOL";
       const { content } = await agentLoop(`
-MANAGEMENT CYCLE${memoryHints}${exitAlerts}${autoCloseInfo}
+MANAGEMENT CYCLE${memoryHints}${exitAlerts}${autoCloseInfo}${kbContext}
 
 HARD CLOSE RULES (check in order — close immediately on first match, no further analysis):
 1. Position instruction condition met → CLOSE immediately (highest priority)
@@ -305,6 +330,15 @@ Example: "AVOID: Entering NOTHING-SOL during 4h +70% pump — reversal risk is h
       // Promote high-hit nugget facts to MEMORY.md
       maybePromote();
       checkCapacity();
+      // Pattern synthesis to knowledge base (throttled, max once/hour, only when recent closes exist)
+      try {
+        const kbGoal = shouldFileObservations();
+        if (kbGoal && !isBusy() && !isScreeningBusy()) {
+          log("kb", "Running KB pattern synthesis...");
+          await agentLoop(kbGoal, 3, [], "GENERAL", config.llm.generalModel)
+            .catch(e => log("kb", `Synthesis skipped: ${e.message}`));
+        }
+      } catch { /* kb synthesis is best-effort */ }
     }
   });
 
@@ -408,9 +442,11 @@ ${activeStrategy ? `\nSAVED STRATEGY (reference, not mandatory): ${activeStrateg
 
       // Pre-load top 3 candidates with recon data in parallel
       let candidateBlocks = "";
+      let loadedCandidates = [];
       try {
         const result = await getTopCandidates({ limit: 5 });
         const candidates = result?.candidates || [];
+        loadedCandidates = candidates;
         // Fetch dynamic fees sequentially to avoid RPC rate limit bursts
         const { fetchDynamicFee } = await import("./tools/screening.js");
         const dynFeeMap = {};
@@ -522,12 +558,19 @@ ${activeStrategy ? `\nSAVED STRATEGY (reference, not mandatory): ${activeStrateg
         }
       } catch { /* best-effort */ }
 
+      // Pre-load KB articles relevant to candidates
+      let kbScreenContext = "";
+      try {
+        const kbHints = kbRecallForScreening(loadedCandidates);
+        if (kbHints) kbScreenContext = `\n\n${kbHints}`;
+      } catch { /* best-effort */ }
+
       const okxSignalGuide = candidateBlocks
         ? `\n\nOKX SIGNAL INTERPRETATION:\n- latest_signal_age_min lower = fresher wallet interest\n- signal_count_30m / signal_count_2h and signal_amount_usd_30m / signal_amount_usd_2h measure recent wallet conviction\n- latest_sold_ratio_percent lower = signal wallets are still holding; higher = signal more exhausted\n- Use OKX signal as confirmation only, never as a standalone deploy trigger\n- Missing OKX signal is neutral, not a hard fail\n`
         : "";
 
       const { content } = await screenerLoop(`
-SCREENING CYCLE — DEPLOY ONLY${memoryHints}${signalWeightsBlock}${candidateBlocks}${okxSignalGuide}
+SCREENING CYCLE — DEPLOY ONLY${memoryHints}${signalWeightsBlock}${kbScreenContext}${candidateBlocks}${okxSignalGuide}
 ${strategyBlock}
 ${candidateBlocks ? `The candidates above are PRE-LOADED with smart wallet, holder, narrative, memory, and OKX signal data.
 Evaluate them directly — no need to call get_top_candidates, check_smart_wallets_on_pool, get_token_holders, or get_token_narrative again.
@@ -551,7 +594,11 @@ ${getRangeSelectionText(deployAmount, currentBalance?.sol)}
       screenReport = `Screening cycle failed: ${error.message}`;
     } finally {
       setScreeningBusy(false);
-      if (screenReport) emit("cycle:screening", { report: screenReport });
+      if (screenReport) {
+        emit("cycle:screening", { report: screenReport });
+        // File screening deploy to KB (direct write, no LLM)
+        try { fileScreeningResult(screenReport); } catch { /* best-effort */ }
+      }
     }
   });
 
@@ -565,7 +612,28 @@ ${getRangeSelectionText(deployAmount, currentBalance?.sol)}
     await maybeRunMissedBriefing();
   }, { timezone: 'UTC' });
 
-  _cronTasks = [mgmtTask, screenTask, briefingTask, briefingWatchdog];
+  // Knowledge base health check (every N hours, configurable)
+  const kbHealthHours = config.knowledgeBase?.healthCheckIntervalHours || 12;
+  const kbHealthTask = cron.schedule(`0 */${Math.max(1, kbHealthHours)} * * *`, async () => {
+    if (!config.knowledgeBase?.enabled) return;
+    const stats = getKbStats();
+    if (stats.totalArticles < 3) return; // Not enough articles to lint
+    if (isBusy() || isManagementBusy() || isScreeningBusy()) return;
+
+    log("cron", "Starting KB health check");
+    try {
+      const { content } = await agentLoop(
+        `KNOWLEDGE BASE HEALTH CHECK: Read kb_read("INDEX.md") to see all articles. Then review 3-5 articles that seem most likely to have issues (oldest, most cross-referenced, or covering active pools). Look for: contradictions between articles, stale data that no longer matches recent performance, missing cross-references ([[concept]] links), and articles that could be merged or split. Fix any issues found using kb_write. Report what you checked and any changes made.`,
+        10, [], "GENERAL", config.llm.generalModel
+      );
+      emit("cycle:kb_health", { report: content });
+      log("cron", "KB health check complete");
+    } catch (e) {
+      log("cron_error", `KB health check failed: ${e.message}`);
+    }
+  }, { timezone: 'UTC' });
+
+  _cronTasks = [mgmtTask, screenTask, briefingTask, briefingWatchdog, kbHealthTask];
 
   // Start lightweight PnL watcher (sub-minute interval, no LLM)
   startPnlWatcher(config.schedule.pnlWatcherIntervalSec);

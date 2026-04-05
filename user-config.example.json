@@ -48,5 +48,13 @@
   "positionSizePct": 0.35,
   "pnlUnit": "sol",
 
-  "webPort": 3737
+  "webPort": 3737,
+
+  "knowledgeBase": {
+    "enabled": true,
+    "dir": "./knowledge",
+    "autoFile": true,
+    "healthCheckIntervalHours": 12,
+    "maxArticles": 500
+  }
 }
