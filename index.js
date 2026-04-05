@@ -1,4 +1,6 @@
 import "dotenv/config";
+import fs from "fs";
+import path from "path";
 import cron from "node-cron";
 import readline from "readline";
 import { agentLoop, lightChat, getScreenerModelLabel, screenerLoop } from "./agent.js";
@@ -32,7 +34,7 @@ import {
 import { startServer } from "./server.js";
 import { getScreeningThresholdSummary, getStartupMode } from "./runtime-helpers.js";
 import { getRangeSelectionText } from "./prompt.js";
-import { shouldFileObservations, getKbStats } from "./knowledge-base.js";
+import { shouldFileObservations, getKbStats, migrateFromJson } from "./knowledge-base.js";
 
 log("startup", "DLMM LP Agent starting...");
 log("startup", `Mode: ${process.env.DRY_RUN === "true" ? "DRY RUN" : "LIVE"}`);
@@ -43,6 +45,20 @@ initMemory();
 
 // One-time lesson dedup on startup
 deduplicateLessons();
+
+// Auto-migrate existing JSON data to knowledge base on first run
+if (config.knowledgeBase?.enabled) {
+  const kbDir = config.knowledgeBase.dir || "./knowledge";
+  if (!fs.existsSync(path.join(kbDir, "INDEX.md"))) {
+    const hasData = fs.existsSync("./lessons.json") || fs.existsSync("./pool-memory.json");
+    if (hasData) {
+      log("kb", "Knowledge base not found — running initial migration...");
+      migrateFromJson().then(r => {
+        log("kb", `Initial migration complete: ${r.created} articles created, ${r.skipped} skipped`);
+      }).catch(e => log("kb", `Initial migration failed: ${e.message}`));
+    }
+  }
+}
 
 const TP_PCT  = config.management.takeProfitFeePct;
 const DEPLOY  = config.management.deployAmountSol;
