@@ -399,29 +399,40 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
         }
       }
 
-      // If primary provider exhausted all retries, fall back to DeepSeek via OpenRouter
-      if (!msg && PROVIDER !== "openrouter" && process.env.DEEPSEEK_API_KEY) {
-        try {
-          log("agent", `All ${PROVIDER} retries exhausted — falling back to DeepSeek`);
-          const deepseekClient = new OpenAI({
-            baseURL: "https://api.deepseek.com/v1",
-            apiKey: process.env.DEEPSEEK_API_KEY,
-          });
-          const dsModel = "deepseek-chat";
-          const dsResponse = await deepseekClient.chat.completions.create({
-            model: dsModel,
-            messages,
-            tools,
-            tool_choice: "auto",
-            temperature: config.llm.temperature,
-            max_tokens: config.llm.maxTokens,
-          });
-          if (dsResponse?.choices?.length) {
-            msg = dsResponse.choices[0].message;
-            log("agent", `DeepSeek fallback succeeded (model: ${dsModel})`);
+      // If primary provider exhausted all retries, fall back to DeepSeek
+      if (!msg) {
+        const DEEPSEEK_FALLBACK_MODELS = {
+          SCREENER: "deepseek/deepseek-v3.2-speciale",
+          MANAGER: "deepseek-chat",
+          GENERAL: "deepseek-chat",
+          AUTORESEARCH: "deepseek/deepseek-v3.2-speciale",
+        };
+        const dsModel = DEEPSEEK_FALLBACK_MODELS[agentType] || "deepseek-chat";
+        const useOpenRouter = dsModel.includes("/");
+
+        const fallbackKey = useOpenRouter ? process.env.OPENROUTER_API_KEY : process.env.DEEPSEEK_API_KEY;
+        if (fallbackKey) {
+          try {
+            log("agent", `All ${PROVIDER} retries exhausted — falling back to ${dsModel} via ${useOpenRouter ? "OpenRouter" : "DeepSeek"}`);
+            const fallbackClient = new OpenAI({
+              baseURL: useOpenRouter ? "https://openrouter.ai/api/v1" : "https://api.deepseek.com/v1",
+              apiKey: fallbackKey,
+            });
+            const dsResponse = await fallbackClient.chat.completions.create({
+              model: dsModel,
+              messages,
+              tools,
+              tool_choice: "auto",
+              temperature: config.llm.temperature,
+              max_tokens: config.llm.maxTokens,
+            });
+            if (dsResponse?.choices?.length) {
+              msg = dsResponse.choices[0].message;
+              log("agent", `Fallback succeeded (model: ${dsModel})`);
+            }
+          } catch (dsErr) {
+            log("agent", `Fallback also failed: ${dsErr.message}`);
           }
-        } catch (dsErr) {
-          log("agent", `DeepSeek fallback also failed: ${dsErr.message}`);
         }
       }
 
