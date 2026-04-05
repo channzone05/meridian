@@ -34,7 +34,7 @@ import {
 import { startServer } from "./server.js";
 import { getScreeningThresholdSummary, getStartupMode } from "./runtime-helpers.js";
 import { getRangeSelectionText } from "./prompt.js";
-import { shouldFileObservations, getKbStats, migrateFromJson } from "./knowledge-base.js";
+import { shouldFileObservations, getKbStats, migrateFromJson, kbRecallForScreening, kbRecallForManagement } from "./knowledge-base.js";
 
 log("startup", "DLMM LP Agent starting...");
 log("startup", `Mode: ${process.env.DRY_RUN === "true" ? "DRY RUN" : "LIVE"}`);
@@ -260,9 +260,17 @@ function startCronJobs() {
         }
       } catch { /* best-effort */ }
 
+      // Pre-load KB articles relevant to open positions
+      let kbContext = "";
+      try {
+        const pos = await getMyPositions().catch(() => null);
+        const kbHints = kbRecallForManagement(pos?.positions || []);
+        if (kbHints) kbContext = `\n\n${kbHints}`;
+      } catch { /* best-effort */ }
+
       const pnlUnit = config.management.pnlUnit?.toUpperCase() || "SOL";
       const { content } = await agentLoop(`
-MANAGEMENT CYCLE${memoryHints}${exitAlerts}${autoCloseInfo}
+MANAGEMENT CYCLE${memoryHints}${exitAlerts}${autoCloseInfo}${kbContext}
 
 HARD CLOSE RULES (check in order — close immediately on first match, no further analysis):
 1. Position instruction condition met → CLOSE immediately (highest priority)
@@ -434,9 +442,11 @@ ${activeStrategy ? `\nSAVED STRATEGY (reference, not mandatory): ${activeStrateg
 
       // Pre-load top 3 candidates with recon data in parallel
       let candidateBlocks = "";
+      let loadedCandidates = [];
       try {
         const result = await getTopCandidates({ limit: 5 });
         const candidates = result?.candidates || [];
+        loadedCandidates = candidates;
         // Fetch dynamic fees sequentially to avoid RPC rate limit bursts
         const { fetchDynamicFee } = await import("./tools/screening.js");
         const dynFeeMap = {};
@@ -548,12 +558,19 @@ ${activeStrategy ? `\nSAVED STRATEGY (reference, not mandatory): ${activeStrateg
         }
       } catch { /* best-effort */ }
 
+      // Pre-load KB articles relevant to candidates
+      let kbScreenContext = "";
+      try {
+        const kbHints = kbRecallForScreening(loadedCandidates);
+        if (kbHints) kbScreenContext = `\n\n${kbHints}`;
+      } catch { /* best-effort */ }
+
       const okxSignalGuide = candidateBlocks
         ? `\n\nOKX SIGNAL INTERPRETATION:\n- latest_signal_age_min lower = fresher wallet interest\n- signal_count_30m / signal_count_2h and signal_amount_usd_30m / signal_amount_usd_2h measure recent wallet conviction\n- latest_sold_ratio_percent lower = signal wallets are still holding; higher = signal more exhausted\n- Use OKX signal as confirmation only, never as a standalone deploy trigger\n- Missing OKX signal is neutral, not a hard fail\n`
         : "";
 
       const { content } = await screenerLoop(`
-SCREENING CYCLE — DEPLOY ONLY${memoryHints}${signalWeightsBlock}${candidateBlocks}${okxSignalGuide}
+SCREENING CYCLE — DEPLOY ONLY${memoryHints}${signalWeightsBlock}${kbScreenContext}${candidateBlocks}${okxSignalGuide}
 ${strategyBlock}
 ${candidateBlocks ? `The candidates above are PRE-LOADED with smart wallet, holder, narrative, memory, and OKX signal data.
 Evaluate them directly — no need to call get_top_candidates, check_smart_wallets_on_pool, get_token_holders, or get_token_narrative again.

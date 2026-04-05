@@ -542,6 +542,116 @@ Use kb_read, kb_search, and kb_list tools to explore. Use kb_write to add observ
 ${truncated}`;
 }
 
+// ─── Pre-loading for Cycles ────────────────────────────────────
+
+/**
+ * Pre-load relevant KB content for a screening cycle.
+ * Searches for articles matching candidate tokens and active strategies.
+ * Returns a formatted string for injection into the cycle goal, or null.
+ */
+export function kbRecallForScreening(candidates = []) {
+  if (!config.knowledgeBase?.enabled) return null;
+  const kbDir = getKbDir();
+  if (!fs.existsSync(kbDir)) return null;
+
+  const hints = [];
+
+  // 1. Check for strategy articles
+  const strategyArticles = listArticles("strategies");
+  for (const a of strategyArticles.slice(0, 3)) {
+    try {
+      const content = fs.readFileSync(path.join(kbDir, a.path), "utf8");
+      // Extract first 300 chars of body (skip title)
+      const body = content.replace(/^#.*\n+/, "").trim().slice(0, 300);
+      if (body) hints.push(`[KB: ${a.title}] ${body}`);
+    } catch { /* skip */ }
+  }
+
+  // 2. Check for pattern articles
+  const patternArticles = listArticles("patterns");
+  for (const a of patternArticles.slice(0, 2)) {
+    try {
+      const content = fs.readFileSync(path.join(kbDir, a.path), "utf8");
+      const body = content.replace(/^#.*\n+/, "").trim().slice(0, 300);
+      if (body) hints.push(`[KB: ${a.title}] ${body}`);
+    } catch { /* skip */ }
+  }
+
+  // 3. Search for articles matching candidate token names
+  for (const c of candidates.slice(0, 3)) {
+    const name = c.name || c.pair || "";
+    const tokenName = name.split("-")[0]?.trim();
+    if (!tokenName || tokenName.length < 2) continue;
+    const results = searchArticles(tokenName);
+    for (const r of (results.results || []).slice(0, 1)) {
+      try {
+        const content = fs.readFileSync(path.join(kbDir, r.path), "utf8");
+        const body = content.replace(/^#.*\n+/, "").trim().slice(0, 400);
+        if (body) hints.push(`[KB: ${r.title}] ${body}`);
+      } catch { /* skip */ }
+    }
+  }
+
+  if (hints.length === 0) return null;
+
+  return `KNOWLEDGE BASE CONTEXT (compiled articles — use alongside lessons and memory):\n${hints.join("\n\n")}\n`;
+}
+
+/**
+ * Pre-load relevant KB content for a management cycle.
+ * Searches for articles matching open position tokens and recent performance.
+ * Returns a formatted string for injection into the cycle goal, or null.
+ */
+export function kbRecallForManagement(positions = []) {
+  if (!config.knowledgeBase?.enabled) return null;
+  const kbDir = getKbDir();
+  if (!fs.existsSync(kbDir)) return null;
+
+  const hints = [];
+
+  // 1. Search for articles matching open position tokens
+  for (const p of positions.slice(0, 5)) {
+    const name = p.pair || p.pool_name || "";
+    const tokenName = name.split("-")[0]?.trim();
+    if (!tokenName || tokenName.length < 2) continue;
+
+    // Check pools/ directory first
+    const results = searchArticles(tokenName);
+    for (const r of (results.results || []).slice(0, 1)) {
+      try {
+        const content = fs.readFileSync(path.join(kbDir, r.path), "utf8");
+        const body = content.replace(/^#.*\n+/, "").trim().slice(0, 400);
+        if (body) hints.push(`[KB: ${r.title}] ${body}`);
+      } catch { /* skip */ }
+    }
+  }
+
+  // 2. Check for recent lesson articles (most recently updated)
+  const lessonArticles = listArticles("lessons");
+  for (const a of lessonArticles.slice(0, 2)) {
+    try {
+      const content = fs.readFileSync(path.join(kbDir, a.path), "utf8");
+      const body = content.replace(/^#.*\n+/, "").trim().slice(0, 300);
+      if (body) hints.push(`[KB: ${a.title}] ${body}`);
+    } catch { /* skip */ }
+  }
+
+  // 3. Check for performance summary
+  const perfArticles = listArticles("performance");
+  if (perfArticles.length > 0) {
+    try {
+      const latest = perfArticles[0]; // Already sorted by updated desc
+      const content = fs.readFileSync(path.join(kbDir, latest.path), "utf8");
+      const body = content.replace(/^#.*\n+/, "").trim().slice(0, 300);
+      if (body) hints.push(`[KB: ${latest.title}] ${body}`);
+    } catch { /* skip */ }
+  }
+
+  if (hints.length === 0) return null;
+
+  return `KNOWLEDGE BASE CONTEXT (compiled articles — use alongside lessons and memory):\n${hints.join("\n\n")}\n`;
+}
+
 // ─── Observation Filing ────────────────────────────────────────
 
 let _lastFileTime = 0;
