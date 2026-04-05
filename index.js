@@ -34,7 +34,7 @@ import {
 import { startServer } from "./server.js";
 import { getScreeningThresholdSummary, getStartupMode } from "./runtime-helpers.js";
 import { getRangeSelectionText } from "./prompt.js";
-import { shouldFileObservations, getKbStats, migrateFromJson, kbRecallForScreening, kbRecallForManagement } from "./knowledge-base.js";
+import { shouldFileObservations, getKbStats, migrateFromJson, kbRecallForScreening, kbRecallForManagement, fileScreeningResult } from "./knowledge-base.js";
 
 log("startup", "DLMM LP Agent starting...");
 log("startup", `Mode: ${process.env.DRY_RUN === "true" ? "DRY RUN" : "LIVE"}`);
@@ -330,15 +330,15 @@ Example: "AVOID: Entering NOTHING-SOL during 4h +70% pump — reversal risk is h
       // Promote high-hit nugget facts to MEMORY.md
       maybePromote();
       checkCapacity();
-      // File observations to knowledge base (throttled, max once/hour)
+      // Pattern synthesis to knowledge base (throttled, max once/hour, only when recent closes exist)
       try {
         const kbGoal = shouldFileObservations();
         if (kbGoal && !isBusy() && !isScreeningBusy()) {
-          log("kb", "Filing observations to knowledge base...");
-          await agentLoop(kbGoal, 5, [], "GENERAL", config.llm.generalModel)
-            .catch(e => log("kb", `Filing skipped: ${e.message}`));
+          log("kb", "Running KB pattern synthesis...");
+          await agentLoop(kbGoal, 3, [], "GENERAL", config.llm.generalModel)
+            .catch(e => log("kb", `Synthesis skipped: ${e.message}`));
         }
-      } catch { /* kb filing is best-effort */ }
+      } catch { /* kb synthesis is best-effort */ }
     }
   });
 
@@ -594,7 +594,11 @@ ${getRangeSelectionText(deployAmount, currentBalance?.sol)}
       screenReport = `Screening cycle failed: ${error.message}`;
     } finally {
       setScreeningBusy(false);
-      if (screenReport) emit("cycle:screening", { report: screenReport });
+      if (screenReport) {
+        emit("cycle:screening", { report: screenReport });
+        // File screening deploy to KB (direct write, no LLM)
+        try { fileScreeningResult(screenReport); } catch { /* best-effort */ }
+      }
     }
   });
 

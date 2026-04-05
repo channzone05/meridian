@@ -21,6 +21,24 @@ function getKbDir() {
   return path.resolve(__dirname, config.knowledgeBase?.dir || "./knowledge");
 }
 
+// ─── Caching Layer ────────────────────────────────────────────
+// Avoids repeated full directory walks + file reads every cycle.
+
+const _cache = {
+  summary: { value: null, ts: 0 },          // getKbSummaryForPrompt
+  stats: { value: null, ts: 0 },             // getKbStats
+  articles: { value: null, ts: 0 },          // listArticles (all)
+  searchIndex: { entries: null, ts: 0 },     // searchArticles index
+};
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+function invalidateCache() {
+  _cache.summary.ts = 0;
+  _cache.stats.ts = 0;
+  _cache.articles.ts = 0;
+  _cache.searchIndex.ts = 0;
+}
+
 // ─── File I/O ──────────────────────────────────────────────────
 
 function ensureDir(dirPath) {
@@ -31,10 +49,16 @@ function ensureDir(dirPath) {
 
 /**
  * List all .md articles, optionally filtered by category (subdirectory).
+ * Uses cache for unfiltered (all) listings to avoid repeated directory walks.
  */
 export function listArticles(category = null) {
   const kbDir = getKbDir();
   if (!fs.existsSync(kbDir)) return [];
+
+  // Cache hit for unfiltered listing
+  if (!category && _cache.articles.value && Date.now() - _cache.articles.ts < CACHE_TTL_MS) {
+    return _cache.articles.value;
+  }
 
   const articles = [];
   const searchDir = category ? path.join(kbDir, category) : kbDir;
@@ -68,6 +92,13 @@ export function listArticles(category = null) {
 
   walk(searchDir, category || "");
   articles.sort((a, b) => new Date(b.updated) - new Date(a.updated));
+
+  // Cache unfiltered results
+  if (!category) {
+    _cache.articles.value = articles;
+    _cache.articles.ts = Date.now();
+  }
+
   return articles;
 }
 
@@ -122,6 +153,9 @@ export function writeArticle(articlePath, content) {
   // Update index entry for this article
   updateIndexEntry(articlePath, content);
 
+  // Invalidate caches so next read picks up the change
+  invalidateCache();
+
   return { success: true, path: articlePath, created: isNew };
 }
 
@@ -142,22 +176,24 @@ export function deleteArticle(articlePath) {
 
   fs.unlinkSync(fullPath);
   removeIndexEntry(articlePath);
+  invalidateCache();
   log("kb", `Deleted article: ${articlePath}`);
   return { success: true, path: articlePath };
 }
 
 /**
- * Full-text search across all articles. Returns matching file paths + context lines.
+ * Build or refresh the in-memory search index (path → { title, lowerContent, lines }).
+ * Avoids re-reading every file on each search call.
  */
-export function searchArticles(query) {
-  if (!query) return { error: "query required" };
+function getSearchIndex() {
+  if (_cache.searchIndex.entries && Date.now() - _cache.searchIndex.ts < CACHE_TTL_MS) {
+    return _cache.searchIndex.entries;
+  }
 
   const kbDir = getKbDir();
-  if (!fs.existsSync(kbDir)) return { results: [], total: 0 };
+  if (!fs.existsSync(kbDir)) return [];
 
-  const queryLower = query.toLowerCase();
-  const results = [];
-
+  const entries = [];
   const walk = (dir, rel) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       if (entry.isDirectory()) {
@@ -167,29 +203,56 @@ export function searchArticles(query) {
         const filePath = path.join(dir, entry.name);
         try {
           const content = fs.readFileSync(filePath, "utf8");
-          const lines = content.split("\n");
-          const matchedLines = [];
-
-          for (let i = 0; i < lines.length; i++) {
-            if (lines[i].toLowerCase().includes(queryLower)) {
-              matchedLines.push({ line: i + 1, text: lines[i].trim() });
-            }
-          }
-
-          if (matchedLines.length > 0) {
-            results.push({
-              path: path.join(rel, entry.name),
-              title: extractTitle(content) || entry.name.replace(".md", ""),
-              matches: matchedLines.length,
-              matchedLines: matchedLines.slice(0, 5), // Top 5 matches
-            });
-          }
-        } catch { /* skip unreadable files */ }
+          entries.push({
+            relPath: path.join(rel, entry.name),
+            title: extractTitle(content) || entry.name.replace(".md", ""),
+            lowerContent: content.toLowerCase(),
+            lines: content.split("\n"),
+          });
+        } catch { /* skip */ }
       }
     }
   };
-
   walk(kbDir, "");
+
+  _cache.searchIndex.entries = entries;
+  _cache.searchIndex.ts = Date.now();
+  return entries;
+}
+
+/**
+ * Full-text search across all articles. Returns matching file paths + context lines.
+ * Uses cached search index to avoid re-reading files on every query.
+ */
+export function searchArticles(query) {
+  if (!query) return { error: "query required" };
+
+  const index = getSearchIndex();
+  if (index.length === 0) return { results: [], total: 0 };
+
+  const queryLower = query.toLowerCase();
+  const results = [];
+
+  for (const entry of index) {
+    if (!entry.lowerContent.includes(queryLower)) continue;
+
+    const matchedLines = [];
+    for (let i = 0; i < entry.lines.length; i++) {
+      if (entry.lines[i].toLowerCase().includes(queryLower)) {
+        matchedLines.push({ line: i + 1, text: entry.lines[i].trim() });
+      }
+    }
+
+    if (matchedLines.length > 0) {
+      results.push({
+        path: entry.relPath,
+        title: entry.title,
+        matches: matchedLines.length,
+        matchedLines: matchedLines.slice(0, 5),
+      });
+    }
+  }
+
   results.sort((a, b) => b.matches - a.matches);
   return { results: results.slice(0, 20), total: results.length };
 }
@@ -487,9 +550,13 @@ export async function migrateFromJson() {
 // ─── Stats & Prompt ────────────────────────────────────────────
 
 /**
- * Get KB statistics.
+ * Get KB statistics. Cached to avoid repeated directory walks.
  */
 export function getKbStats() {
+  if (_cache.stats.value && Date.now() - _cache.stats.ts < CACHE_TTL_MS) {
+    return _cache.stats.value;
+  }
+
   const kbDir = getKbDir();
   if (!fs.existsSync(kbDir)) {
     return { totalArticles: 0, totalWords: 0, categories: {}, lastUpdated: null };
@@ -507,20 +574,30 @@ export function getKbStats() {
     if (!lastUpdated || a.updated > lastUpdated) lastUpdated = a.updated;
   }
 
-  return {
+  const result = {
     totalArticles: articles.length,
     totalWords,
     categories,
     lastUpdated,
   };
+
+  _cache.stats.value = result;
+  _cache.stats.ts = Date.now();
+  return result;
 }
 
 /**
  * Short summary for system prompt injection.
  * Returns null if KB is empty or disabled.
+ * Cached for CACHE_TTL_MS to avoid re-reading INDEX.md every cycle.
  */
 export function getKbSummaryForPrompt() {
   if (!config.knowledgeBase?.enabled) return null;
+
+  // Return cached summary if fresh
+  if (_cache.summary.value !== null && Date.now() - _cache.summary.ts < CACHE_TTL_MS) {
+    return _cache.summary.value;
+  }
 
   const kbDir = getKbDir();
   const indexPath = path.join(kbDir, "INDEX.md");
@@ -535,11 +612,15 @@ export function getKbSummaryForPrompt() {
     ? indexContent.slice(0, 3000) + "\n...(truncated, use kb_read for full index)"
     : indexContent;
 
-  return `Knowledge Base: ${stats.totalArticles} articles, ${stats.totalWords} words across ${Object.keys(stats.categories).length} categories.
+  const result = `Knowledge Base: ${stats.totalArticles} articles, ${stats.totalWords} words across ${Object.keys(stats.categories).length} categories.
 Last updated: ${stats.lastUpdated?.slice(0, 10) || "never"}
 Use kb_read, kb_search, and kb_list tools to explore. Use kb_write to add observations.
 
 ${truncated}`;
+
+  _cache.summary.value = result;
+  _cache.summary.ts = Date.now();
+  return result;
 }
 
 // ─── Pre-loading for Cycles ────────────────────────────────────
@@ -658,8 +739,13 @@ let _lastFileTime = 0;
 const FILE_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
 
 /**
- * Check if observations should be filed after a management cycle.
- * Returns a goal string for the agent if filing is needed, null otherwise.
+ * Check if pattern synthesis should run after a management cycle.
+ * Only triggers when there have been recent position closes (data to synthesize).
+ * Returns a goal string for the agent if synthesis is needed, null otherwise.
+ *
+ * Note: Individual position closes and screening deploys are now filed directly
+ * via filePositionClose() and fileScreeningResult() — no LLM needed for those.
+ * This function only triggers LLM-driven pattern synthesis across articles.
  */
 export function shouldFileObservations() {
   if (!config.knowledgeBase?.enabled || !config.knowledgeBase?.autoFile) return null;
@@ -668,8 +754,113 @@ export function shouldFileObservations() {
   const kbDir = getKbDir();
   if (!fs.existsSync(kbDir)) return null;
 
+  // Only trigger if there are pool articles with recent updates (position closes filed)
+  const poolArticles = listArticles("pools");
+  const recentCloses = poolArticles.filter(a => {
+    const age = Date.now() - new Date(a.updated).getTime();
+    return age < FILE_COOLDOWN_MS; // Updated within cooldown period
+  });
+  if (recentCloses.length === 0) return null;
+
   _lastFileTime = Date.now();
-  return `KNOWLEDGE BASE FILING: Review recent management cycle results. If there were notable events (position closes, significant PnL changes, new patterns observed), file observations into the knowledge base using kb_write. Update existing articles if relevant, or create new ones. Keep articles concise and interlinked using [[concept]] syntax. Skip filing if nothing notable happened.`;
+  return `KNOWLEDGE BASE SYNTHESIS: ${recentCloses.length} position(s) closed recently (${recentCloses.map(a => a.title).join(", ")}). Review pool articles via kb_list category=pools, look for recurring patterns across recent closes (similar loss causes, strategy effectiveness, volatility thresholds). If you find a pattern, write or update a patterns/ article using kb_write. Use [[concept]] syntax for cross-references. Be concise — max 1 new article per synthesis.`;
+}
+
+/**
+ * Direct KB write on position close — no LLM needed.
+ * Called from recordPerformance() to capture every close as structured data.
+ * Updates or creates pool article with latest deploy outcome.
+ */
+export function filePositionClose(perf) {
+  if (!config.knowledgeBase?.enabled) return;
+
+  try {
+    const kbDir = getKbDir();
+    const name = perf.pool_name || perf.pool?.slice(0, 8) || "unknown";
+    const slug = name.replace(/[^a-zA-Z0-9]+/g, "-").toLowerCase().replace(/^-+|-+$/g, "") || "unknown";
+    const articlePath = `pools/${slug}.md`;
+    const fullPath = path.join(kbDir, articlePath);
+
+    const pnl = perf.pnl_pct ?? perf.actual_pnl_pct ?? 0;
+    const outcome = pnl >= 0 ? "WIN" : "LOSS";
+    const now = new Date().toISOString().slice(0, 16);
+    const strategy = perf.strategy || "unknown";
+    const reason = perf.close_reason || "manual";
+    const held = perf.minutes_held ?? "?";
+    const vol = perf.volatility ?? "?";
+    const rangeEff = perf.minutes_held > 0
+      ? ((perf.minutes_in_range / perf.minutes_held) * 100).toFixed(0)
+      : "?";
+
+    const closeLine = `- **${outcome}** ${now}: PnL ${pnl.toFixed(1)}%, held ${held}min, strategy: ${strategy}, range_eff: ${rangeEff}%, vol: ${vol}, reason: ${reason}`;
+
+    if (fs.existsSync(fullPath)) {
+      // Append to existing pool article under Deploy History section
+      let content = fs.readFileSync(fullPath, "utf8");
+      const historyMarker = "## Deploy History";
+      if (content.includes(historyMarker)) {
+        // Insert new close after the section header line
+        const idx = content.indexOf(historyMarker);
+        const afterHeader = content.indexOf("\n", idx) + 1;
+        content = content.slice(0, afterHeader) + "\n" + closeLine + "\n" + content.slice(afterHeader);
+      } else {
+        content += `\n\n${historyMarker}\n\n${closeLine}\n`;
+      }
+      writeArticle(articlePath, content);
+    } else {
+      // Create new pool article
+      let content = `# Pool: ${name}\n\n`;
+      if (perf.pool) content += `**Address:** \`${perf.pool}\`\n`;
+      if (perf.base_mint) content += `**Base Mint:** \`${perf.base_mint}\`\n`;
+      content += `\n## Deploy History\n\n${closeLine}\n`;
+      content += `\n## Notes\n\n*Auto-created on position close.*\n`;
+      writeArticle(articlePath, content);
+    }
+
+    log("kb", `Filed position close: ${name} (${outcome}, ${pnl.toFixed(1)}%)`);
+  } catch (e) {
+    log("kb", `Failed to file position close: ${e.message}`);
+  }
+}
+
+/**
+ * Direct KB write after screening deploys — no LLM needed.
+ * Called from the screening cycle to record deploy decisions.
+ */
+export function fileScreeningResult(report) {
+  if (!config.knowledgeBase?.enabled || !config.knowledgeBase?.autoFile) return;
+  if (!report) return;
+
+  try {
+    // Extract deploy info from screening report text
+    const deployMatch = report.match(/deploy.*?(\w+-SOL)/i);
+    if (!deployMatch) return; // No deploy happened
+
+    const now = new Date();
+    const weekNum = getWeekNumber(now);
+    const articlePath = `performance/weekly-screening-${now.getFullYear()}-w${weekNum}.md`;
+    const kbDir = getKbDir();
+    const fullPath = path.join(kbDir, articlePath);
+
+    const entry = `- ${now.toISOString().slice(0, 16)}: ${deployMatch[0].slice(0, 200)}`;
+
+    if (fs.existsSync(fullPath)) {
+      let content = fs.readFileSync(fullPath, "utf8");
+      content = content.trimEnd() + "\n" + entry + "\n";
+      writeArticle(articlePath, content);
+    } else {
+      const content = `# Screening Log: ${now.getFullYear()} Week ${weekNum}\n\n*Auto-maintained log of screening deploys.*\n\n${entry}\n`;
+      writeArticle(articlePath, content);
+    }
+  } catch (e) {
+    log("kb", `Failed to file screening result: ${e.message}`);
+  }
+}
+
+function getWeekNumber(d) {
+  const start = new Date(d.getFullYear(), 0, 1);
+  const diff = d - start + (start.getTimezoneOffset() - d.getTimezoneOffset()) * 60000;
+  return Math.ceil((diff / 86400000 + start.getDay() + 1) / 7);
 }
 
 // ─── Helpers ───────────────────────────────────────────────────
