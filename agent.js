@@ -399,6 +399,32 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
         }
       }
 
+      // If primary provider exhausted all retries, fall back to DeepSeek via OpenRouter
+      if (!msg && PROVIDER !== "openrouter" && process.env.DEEPSEEK_API_KEY) {
+        try {
+          log("agent", `All ${PROVIDER} retries exhausted — falling back to DeepSeek`);
+          const deepseekClient = new OpenAI({
+            baseURL: "https://api.deepseek.com/v1",
+            apiKey: process.env.DEEPSEEK_API_KEY,
+          });
+          const dsModel = "deepseek-chat";
+          const dsResponse = await deepseekClient.chat.completions.create({
+            model: dsModel,
+            messages,
+            tools,
+            tool_choice: "auto",
+            temperature: config.llm.temperature,
+            max_tokens: config.llm.maxTokens,
+          });
+          if (dsResponse?.choices?.length) {
+            msg = dsResponse.choices[0].message;
+            log("agent", `DeepSeek fallback succeeded (model: ${dsModel})`);
+          }
+        } catch (dsErr) {
+          log("agent", `DeepSeek fallback also failed: ${dsErr.message}`);
+        }
+      }
+
       if (!msg) {
         throw new Error("Provider returned no assistant message");
       }
