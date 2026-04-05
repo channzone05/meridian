@@ -309,9 +309,10 @@ Example: "AVOID: Entering NOTHING-SOL during 4h +70% pump — reversal risk is h
       // File observations to knowledge base (throttled, max once/hour)
       try {
         const kbGoal = shouldFileObservations();
-        if (kbGoal) {
+        if (kbGoal && !isBusy() && !isScreeningBusy()) {
           log("kb", "Filing observations to knowledge base...");
-          await lightChat(kbGoal, []).catch(e => log("kb", `Filing skipped: ${e.message}`));
+          await agentLoop(kbGoal, 5, [], "GENERAL", config.llm.generalModel)
+            .catch(e => log("kb", `Filing skipped: ${e.message}`));
         }
       } catch { /* kb filing is best-effort */ }
     }

@@ -38,6 +38,7 @@ export function listArticles(category = null) {
 
   const articles = [];
   const searchDir = category ? path.join(kbDir, category) : kbDir;
+  if (!searchDir.startsWith(kbDir)) return []; // prevent path traversal
   if (!fs.existsSync(searchDir)) return [];
 
   const walk = (dir, rel) => {
@@ -58,7 +59,7 @@ export function listArticles(category = null) {
             title,
             summary,
             updated: stat.mtime.toISOString(),
-            words: content.split(/\s+/).length,
+            words: content.trim().split(/\s+/).filter(Boolean).length,
           });
         } catch { /* skip unreadable files */ }
       }
@@ -341,7 +342,7 @@ export async function migrateFromJson() {
         }
 
         for (const [tag, tagLessons] of Object.entries(groups)) {
-          const slug = tag.replace(/[^a-zA-Z0-9]+/g, "-").toLowerCase().replace(/^-+|-+$/g, "");
+          const slug = tag.replace(/[^a-zA-Z0-9]+/g, "-").toLowerCase().replace(/^-+|-+$/g, "") || "uncategorized";
           const articlePath = `lessons/${slug}.md`;
           const fullPath = path.join(kbDir, articlePath);
 
@@ -357,8 +358,8 @@ export async function migrateFromJson() {
             content += `\n`;
           }
 
-          writeArticle(articlePath, content);
-          created++;
+          const result = writeArticle(articlePath, content);
+          if (result.success) created++; else skipped++;
         }
       }
 
@@ -386,8 +387,8 @@ export async function migrateFromJson() {
             content += `- ${p.pool_name || p.pool || "unknown"}: ${(p.pnl_pct ?? 0).toFixed(1)}% PnL, ${p.close_reason || "manual"}\n`;
           }
 
-          writeArticle(perfPath, content);
-          created++;
+          const perfResult = writeArticle(perfPath, content);
+          if (perfResult.success) created++; else skipped++;
         } else { skipped++; }
       }
     }
@@ -404,7 +405,7 @@ export async function migrateFromJson() {
       for (const [addr, pool] of Object.entries(pools)) {
         if ((pool.total_deploys || 0) < 2) continue; // Only migrate pools with history
 
-        const slug = (pool.name || addr.slice(0, 8)).replace(/[^a-zA-Z0-9]+/g, "-").toLowerCase().replace(/^-+|-+$/g, "");
+        const slug = (pool.name || addr.slice(0, 8)).replace(/[^a-zA-Z0-9]+/g, "-").toLowerCase().replace(/^-+|-+$/g, "") || addr.slice(0, 8);
         const articlePath = `pools/${slug}.md`;
         const fullPath = path.join(kbDir, articlePath);
 
@@ -433,8 +434,8 @@ export async function migrateFromJson() {
           }
         }
 
-        writeArticle(articlePath, content);
-        created++;
+        const poolResult = writeArticle(articlePath, content);
+        if (poolResult.success) created++; else skipped++;
       }
     }
   } catch (e) {
@@ -449,6 +450,7 @@ export async function migrateFromJson() {
     for (const nuggetName of ["strategies", "patterns"]) {
       try {
         const nugget = shelf.get(nuggetName);
+        if (!nugget) continue;
         const facts = nugget.facts();
         if (facts.length === 0) continue;
 
@@ -466,8 +468,8 @@ export async function migrateFromJson() {
           content += `\n`;
         }
 
-        writeArticle(articlePath, content);
-        created++;
+        const nuggetResult = writeArticle(articlePath, content);
+        if (nuggetResult.success) created++; else skipped++;
       } catch { /* nugget may not exist */ }
     }
   } catch (e) {
