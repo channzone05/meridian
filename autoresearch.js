@@ -148,19 +148,29 @@ async function analyzeAndGenerate(perfData, lessons, cfg, state) {
     }
   }
 
-  // 2. Pick the worst section
-  let worstSection = "screener_criteria";
-  let worstCount = 0;
-  for (const [section, losses] of Object.entries(sectionLosses)) {
-    if (losses.length > worstCount) {
-      worstCount = losses.length;
-      worstSection = section;
-    }
-  }
-
-  if (worstCount === 0) {
+  // 2. Pick the worst section — with rotation to avoid optimizing the same section repeatedly
+  const sections = Object.entries(sectionLosses).filter(([, losses]) => losses.length > 0);
+  if (sections.length === 0) {
     log("autoresearch", "No losses in recent closes — nothing to optimize");
     return;
+  }
+
+  // Check last N experiments — if the same section was targeted 3+ times in a row, rotate
+  const MAX_CONSECUTIVE = 3;
+  const recentSections = (state.experiments || []).slice(-MAX_CONSECUTIVE).map(e => e.section);
+  const lastSection = recentSections[0];
+  const allSame = recentSections.length >= MAX_CONSECUTIVE && recentSections.every(s => s === lastSection);
+
+  // Sort by loss count descending
+  sections.sort((a, b) => b[1].length - a[1].length);
+
+  let worstSection, worstCount;
+  if (allSame && sections.length > 1) {
+    // Force rotation to the second-worst section
+    [worstSection, { length: worstCount }] = [sections[1][0], { length: sections[1][1].length }];
+    log("autoresearch", `Rotating away from ${lastSection} (${MAX_CONSECUTIVE}x consecutive) → trying ${worstSection}`);
+  } else {
+    [worstSection, { length: worstCount }] = [sections[0][0], { length: sections[0][1].length }];
   }
 
   log("autoresearch", `Worst section: ${worstSection} (${worstCount} attributed losses)`);
