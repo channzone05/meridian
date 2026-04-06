@@ -360,17 +360,28 @@ export async function deployPosition({
     log("deploy", `Auto-calculated bins_below=${bins_below} from price_range_pct=${price_range_pct}% at bin_step=${resolvedBinStep}`);
   }
 
-  // ─── Hard guard: validate actual range % when bins passed directly ───
-  // Models sometimes pass raw bin counts from a different bin_step pool.
-  // At bin_step 25, 96 bins = 21% range (model probably thought bin_step 80 = 53%).
-  // Recalculate from the volatility table minimum (40% for moderate).
-  if (bins_below > 0 && !price_range_pct && resolvedBinStep) {
+  // ─── Hard guard: validate actual range % — always check, even when price_range_pct is set ───
+  // Models sometimes pass bins_below AND price_range_pct but the bins don't match the %.
+  // Always verify the actual range and correct if too narrow.
+  if (bins_below > 0 && resolvedBinStep) {
     const stepPct = resolvedBinStep / 10000;
     const actualRangePct = (1 - Math.pow(1 + stepPct, -bins_below)) * 100;
     const MIN_RANGE_PCT = 35; // absolute floor — no position should be narrower
-    if (actualRangePct < MIN_RANGE_PCT) {
+
+    // If price_range_pct was also provided, use the larger of the two
+    if (price_range_pct > 0) {
+      const binsFromPct = calculateBinsForPriceRange(resolvedBinStep, price_range_pct);
+      if (binsFromPct > bins_below) {
+        log("deploy", `bins_below=${bins_below} (${actualRangePct.toFixed(1)}%) doesn't match price_range_pct=${price_range_pct}%. Using ${binsFromPct} bins instead`);
+        bins_below = binsFromPct;
+      }
+    }
+
+    // Enforce absolute minimum
+    const finalRangePct = (1 - Math.pow(1 + stepPct, -bins_below)) * 100;
+    if (finalRangePct < MIN_RANGE_PCT) {
       const correctedBins = calculateBinsForPriceRange(resolvedBinStep, MIN_RANGE_PCT);
-      log("deploy", `Range too narrow: ${bins_below} bins at bs${resolvedBinStep} = ${actualRangePct.toFixed(1)}% (min ${MIN_RANGE_PCT}%). Correcting to ${correctedBins} bins`);
+      log("deploy", `Range too narrow: ${bins_below} bins at bs${resolvedBinStep} = ${finalRangePct.toFixed(1)}% (min ${MIN_RANGE_PCT}%). Correcting to ${correctedBins} bins`);
       bins_below = correctedBins;
     }
   }
