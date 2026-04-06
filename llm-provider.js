@@ -346,9 +346,9 @@ export function runClaudeCli(model, prompt, {
       args.push("--effort", effort);
     }
 
-    if (systemPrompt) {
-      args.push("--system-prompt", systemPrompt);
-    }
+    // Note: --system-prompt can't be used for large prompts (ENAMETOOLONG).
+    // Instead, prepend system prompt to stdin content for KV cache benefits.
+    // claude -p still caches the prefix of stdin within its TTL window.
 
     const spawnCommand = viaCmd ? (process.env.ComSpec || "cmd.exe") : command;
     const spawnArgs = viaCmd ? ["/d", "/c", command, ...args] : args;
@@ -357,7 +357,10 @@ export function runClaudeCli(model, prompt, {
       windowsHide: true,
     });
 
-    child.stdin.end(prompt, "utf8");
+    // Prepend system prompt to stdin for KV cache — claude -p caches the
+    // prefix of stdin within its TTL. Stable system prompt = cache hits.
+    const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
+    child.stdin.end(fullPrompt, "utf8");
 
     let killed = false;
     const killTimer = setTimeout(() => {

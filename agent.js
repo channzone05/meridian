@@ -1,3 +1,4 @@
+import OpenAI from "openai";
 import { buildSystemPrompt } from "./prompt.js";
 import { executeTool } from "./tools/executor.js";
 import { tools } from "./tools/definitions.js";
