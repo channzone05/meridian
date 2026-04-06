@@ -136,6 +136,27 @@ function buildCodexTranscript(messages) {
   }).join("\n\n");
 }
 
+// Static system prompt — cached by claude -p via --system-prompt (KV cache friendly)
+const _systemPromptCache = {};
+function getClaudeSystemPrompt(agentType) {
+  if (_systemPromptCache[agentType]) return _systemPromptCache[agentType];
+  _systemPromptCache[agentType] = [
+    `You are the ${agentType} reasoning engine for a JavaScript trading agent runner.`,
+    "Return raw JSON only. Do not wrap it in markdown fences or add any extra commentary.",
+    "Choose one of two actions only:",
+    '1. "respond" when you can fully answer the user with the information already available.',
+    '2. "tool_calls" when you need one or more listed tools to continue.',
+    "If you choose tool_calls, keep response null and provide exact JSON arguments for each tool call.",
+    "Never invent tool outputs, transaction results, or on-chain state.",
+    "Only use tool names from the available tools list.",
+    "Be conservative with write tools. Only call them when you intentionally want the runner to perform the real action.",
+    'Return exactly this shape: {"action":"respond","response":"...","tool_calls":[]} or {"action":"tool_calls","response":null,"tool_calls":[{"name":"tool_name","arguments":{}}]}',
+    `AVAILABLE TOOLS:\n${TOOL_SUMMARIES_TEXT}`,
+  ].join("\n\n");
+  return _systemPromptCache[agentType];
+}
+
+// Full prompt for Codex/OpenRouter (everything in one blob)
 function buildCodexAgentPrompt(messages, agentType) {
   const transcript = buildCodexTranscript(messages);
 
@@ -237,9 +258,12 @@ const CLAUDE_EFFORT_BY_ROLE = {
 };
 
 async function createClaudeMessage(messages, model, agentType, step) {
-  const prompt = buildCodexAgentPrompt(messages, agentType); // same JSON contract
+  // Split: static system prompt goes via --system-prompt (KV cached by claude -p)
+  // Dynamic transcript goes via stdin (changes every call, not cached)
+  const transcript = buildCodexTranscript(messages);
+  const systemPrompt = getClaudeSystemPrompt(agentType);
   const effort = CLAUDE_EFFORT_BY_ROLE[agentType] || "medium";
-  const content = await runClaudeCli(model, prompt, { effort });
+  const content = await runClaudeCli(model, `CONVERSATION TRANSCRIPT:\n${transcript}`, { effort, systemPrompt });
 
   if (!content) {
     throw new Error("Empty response from Claude CLI");
@@ -383,8 +407,16 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
           msg = await createProviderMessage(messages, usedModel, agentType, step);
           break;
         } catch (apiErr) {
+          const errMsg = apiErr.message || "";
+          // Claude rate limit — skip retries, go straight to DeepSeek
+          if (errMsg.includes("rate limited") || errMsg.includes("hit your limit") || errMsg.includes("resets")) {
+            log("agent", `Claude rate limited — skipping retries, falling back to DeepSeek`);
+            msg = null;
+            break;
+          }
+
           const status = apiErr.status || apiErr.statusCode;
-          const retryable = PROVIDER === "codex" || RETRYABLE.has(status);
+          const retryable = PROVIDER === "codex" || PROVIDER === "claude" || RETRYABLE.has(status);
           if (!retryable) throw apiErr;
 
           if (attempt >= 1 && fallbackModel && usedModel !== fallbackModel) {

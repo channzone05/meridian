@@ -297,11 +297,40 @@ function resolveClaudeLaunch() {
   return { command: "claude", viaCmd: false };
 }
 
+// Rate limit tracking — skip Claude and go straight to DeepSeek until reset
+let _claudeRateLimitedUntil = 0;
+
+export function isClaudeRateLimited() {
+  return Date.now() < _claudeRateLimitedUntil;
+}
+
+function parseRateLimitReset(msg) {
+  // "You've hit your limit · resets 10pm (America/New_York)"
+  // "You've hit your limit · resets 12pm (America/New_York)"
+  const match = msg?.match(/resets?\s+(\d{1,2})(am|pm)/i);
+  if (!match) return Date.now() + 3600_000; // default 1 hour
+  let hour = parseInt(match[1]);
+  if (match[2].toLowerCase() === "pm" && hour < 12) hour += 12;
+  if (match[2].toLowerCase() === "am" && hour === 12) hour = 0;
+
+  // Build target time in ET (approximate — use local offset)
+  const now = new Date();
+  const target = new Date(now);
+  target.setHours(hour + 4, 0, 0, 0); // ET is roughly UTC-4/5
+  if (target <= now) target.setDate(target.getDate() + 1);
+  return target.getTime();
+}
+
 export function runClaudeCli(model, prompt, {
   timeoutMs = 180000,
   systemPrompt = null,
   effort = null,
 } = {}) {
+  // Skip if rate limited — caller should fall back to DeepSeek
+  if (isClaudeRateLimited()) {
+    const mins = Math.ceil((_claudeRateLimitedUntil - Date.now()) / 60000);
+    return Promise.reject(new Error(`Claude rate limited — resets in ~${mins}m. Use DeepSeek fallback.`));
+  }
   return new Promise((resolve, reject) => {
     const stdoutChunks = [];
     const stderrChunks = [];
@@ -354,7 +383,14 @@ export function runClaudeCli(model, prompt, {
       try {
         const parsed = JSON.parse(output.trim());
         if (parsed.is_error) {
-          reject(new Error(parsed.result || "Claude CLI returned an error"));
+          const msg = parsed.result || "";
+          // Detect rate limit and set cooldown
+          if (msg.includes("hit your limit") || msg.includes("resets")) {
+            _claudeRateLimitedUntil = parseRateLimitReset(msg);
+            const mins = Math.ceil((_claudeRateLimitedUntil - Date.now()) / 60000);
+            log("claude", `Rate limited — cooldown set for ~${mins} minutes`);
+          }
+          reject(new Error(msg || "Claude CLI returned an error"));
         } else if (parsed.type === "result") {
           resolve(typeof parsed.result === "string" ? parsed.result.trim() : "");
         } else {
