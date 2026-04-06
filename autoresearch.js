@@ -420,8 +420,8 @@ function logExperimentLesson(experiment, outcome, improvementPct) {
 
 async function callLLM(model, sectionName, lossCount, currentText, failureDesc) {
   const provider = getLlmProvider();
-  if (provider === "codex") {
-    const systemMsg = `You optimize prompts for an autonomous LP (Liquidity Provider) trading agent on Meteora/Solana DLMM. The agent uses these prompts as behavioral instructions. Your goal is to make small, surgical edits that reduce losses.
+
+  const systemMsg = `You optimize prompts for an autonomous LP (Liquidity Provider) trading agent on Meteora/Solana DLMM. The agent uses these prompts as behavioral instructions. Your goal is to make small, surgical edits that reduce losses.
 
 KEY DOMAIN KNOWLEDGE for your modifications:
 - STRATEGIES: The agent can deploy "bid_ask" (single-sided SOL below price — earns fees on sell pressure, safe but goes idle if price pumps UP) or "spot" with sol_split_pct (two-sided, e.g. 80% SOL / 20% token — captures fees in both directions, better for pumping tokens but riskier if token dumps).
@@ -432,7 +432,7 @@ KEY DOMAIN KNOWLEDGE for your modifications:
 - HARD RULE: NEVER propose widening price_range_pct to fix OOR upside on bid_ask or SOL-only spot strategies. These strategies place bins BELOW the active bin only — wider range adds more bins below, which CANNOT reach a price that pumped ABOVE. This is a physical impossibility, not a tuning problem. If OOR upside is the issue, the fix is strategy selection or screener criteria, never range width.
 - The agent has signal weights showing which screening signals predict wins (organic_score, fee_tvl_ratio, mcap are strong; holder_count, volume are weak).`;
 
-    const userMsg = `Section "${sectionName}" has caused ${lossCount} recent losses.
+  const userMsg = `Section "${sectionName}" has caused ${lossCount} recent losses.
 
 Current text:
 ---
@@ -449,6 +449,7 @@ HYPOTHESIS: [one sentence explaining what you're changing and why]
 MODIFIED_TEXT:
 [full section text with your single change applied]`;
 
+  if (provider === "codex") {
     const content = await runCodexExec(model, `${systemMsg}\n\n${userMsg}`, {
       cwd: process.cwd(),
       sandbox: "read-only",
