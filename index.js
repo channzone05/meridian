@@ -628,8 +628,17 @@ ${getRangeSelectionText(deployAmount, currentBalance?.sol)}
 
     log("cron", "Starting KB health check");
     try {
+      // Fast deterministic lint first — no LLM needed
+      const { lintKnowledgeBase } = await import("./knowledge-base.js");
+      const lintResult = lintKnowledgeBase();
+      if (lintResult) {
+        log("cron", `KB lint: ${lintResult.total_articles} articles, ${lintResult.issues.length} issues (${lintResult.orphan_count} orphans, ${lintResult.stale_count} stale, ${lintResult.empty_count} empty)`);
+      }
+      // Only call LLM for deeper review if lint found issues
+      const issueCount = lintResult?.issues?.length || 0;
+      const lintContext = issueCount > 0 ? `\n\nLINT RESULTS (${issueCount} issues):\n${lintResult.issues.join("\n")}` : "";
       const { content } = await agentLoop(
-        `KNOWLEDGE BASE HEALTH CHECK: Read kb_read("INDEX.md") to see all articles. Then review 3-5 articles that seem most likely to have issues (oldest, most cross-referenced, or covering active pools). Look for: contradictions between articles, stale data that no longer matches recent performance, missing cross-references ([[concept]] links), and articles that could be merged or split. Fix any issues found using kb_write. Report what you checked and any changes made.`,
+        `KNOWLEDGE BASE HEALTH CHECK:${lintContext}\nRead kb_read("INDEX.md") to see all articles. Review 3-5 articles that seem most likely to have issues. Look for: contradictions, stale data, missing cross-references, and articles that could be merged. Fix any issues using kb_write. Report what you checked and any changes made.`,
         10, [], "GENERAL", config.llm.generalModel
       );
       emit("cycle:kb_health", { report: content });
