@@ -493,34 +493,6 @@ MODIFIED_TEXT:
   const apiKey = getProviderApiKey();
   if (!apiKey) throw new Error("LLM API key/token not available for autoresearch");
 
-  const systemMsg = `You optimize prompts for an autonomous LP (Liquidity Provider) trading agent on Meteora/Solana DLMM. The agent uses these prompts as behavioral instructions. Your goal is to make small, surgical edits that reduce losses.
-
-KEY DOMAIN KNOWLEDGE for your modifications:
-- STRATEGIES: The agent can deploy "bid_ask" (single-sided SOL below price — earns fees on sell pressure, safe but goes idle if price pumps UP) or "spot" with sol_split_pct (two-sided, e.g. 80% SOL / 20% token — captures fees in both directions, better for pumping tokens but riskier if token dumps).
-- OOR UPSIDE: Price pumped above the position range. For bid_ask, SOL sits idle earning nothing. Spot two-sided would have captured fees on the way up.
-- OOR DOWNSIDE: Price dropped below the position range. SOL converted to token, real loss. Wider range helps stay in range longer.
-- If failures show repeated "OOR upside" with bid_ask, consider switching to spot with high sol_split_pct (80-90) for those pool types, or improving screener criteria to avoid deploying into tokens that are mid-pump.
-- If failures show "OOR downside", consider widening price_range_pct or tightening screening thresholds.
-- HARD RULE: NEVER propose widening price_range_pct to fix OOR upside on bid_ask or SOL-only spot strategies. These strategies place bins BELOW the active bin only — wider range adds more bins below, which CANNOT reach a price that pumped ABOVE. This is a physical impossibility, not a tuning problem. If OOR upside is the issue, the fix is strategy selection or screener criteria, never range width.
-- The agent has signal weights showing which screening signals predict wins (organic_score, fee_tvl_ratio, mcap are strong; holder_count, volume are weak).`;
-
-  const userMsg = `Section "${sectionName}" has caused ${lossCount} recent losses.
-
-Current text:
----
-${currentText}
----
-
-Recent failures:
-${failureDesc}
-
-Generate exactly ONE small, targeted modification. Change only one instruction or threshold. Do not rewrite the whole section.
-
-Reply with:
-HYPOTHESIS: [one sentence explaining what you're changing and why]
-MODIFIED_TEXT:
-[full section text with your single change applied]`;
-
   const response = await fetch(baseURL, {
     method: "POST",
     headers: {
