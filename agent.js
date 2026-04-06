@@ -303,14 +303,20 @@ async function createProviderMessage(messages, model, agentType, step) {
     return createClaudeMessage(messages, model, agentType, step);
   }
 
-  const response = await client.chat.completions.create({
+  const completionOptions = {
     model,
     messages,
     tools,
     tool_choice: "auto",
     temperature: config.llm.temperature,
     max_tokens: config.llm.maxTokens,
-  });
+  };
+
+  if (PROVIDER === "minimax" && agentType === "SCREENER") {
+    completionOptions.extra_body = { reasoning_split: true };
+  }
+
+  const response = await client.chat.completions.create(completionOptions);
 
   if (!response?.choices?.length) {
     const errCode = response?.error?.code || response?.error?.status;

@@ -493,21 +493,27 @@ MODIFIED_TEXT:
   const apiKey = getProviderApiKey();
   if (!apiKey) throw new Error("LLM API key/token not available for autoresearch");
 
+  const body = {
+    model,
+    messages: [
+      { role: "system", content: systemMsg },
+      { role: "user", content: userMsg },
+    ],
+    temperature: 0.4,
+    max_tokens: 4096,
+  };
+
+  if (provider === "minimax") {
+    body.reasoning_split = true;
+  }
+
   const response = await fetch(baseURL, {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: systemMsg },
-        { role: "user", content: userMsg },
-      ],
-      temperature: 0.4,
-      max_tokens: 4096,
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
@@ -516,7 +522,8 @@ MODIFIED_TEXT:
   }
 
   const data = await response.json();
-  const content = data.choices?.[0]?.message?.content;
+  const message = data.choices?.[0]?.message;
+  const content = message?.content;
   if (!content) throw new Error("Empty response from LLM");
 
   // Parse response

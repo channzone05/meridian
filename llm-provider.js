@@ -13,6 +13,8 @@ export function getLlmProvider() {
 export function getDefaultModelForProvider(provider = getLlmProvider()) {
   if (provider === "codex") return "gpt-4o";
   if (provider === "claude") return "sonnet";
+  if (provider === "deepseek") return "deepseek-chat";
+  if (provider === "minimax") return "MiniMax-M2.7";
   return "openai/gpt-5.4-nano";
 }
 
@@ -45,7 +47,9 @@ export function getProviderApiKey(provider = getLlmProvider()) {
     throw new Error("Claude provider uses the Claude CLI (OAuth), not direct API key access.");
   }
   if (provider === "deepseek") return process.env.DEEPSEEK_API_KEY;
-  return process.env.OPENROUTER_API_KEY;
+  if (provider === "minimax") return process.env.MINIMAX_API_KEY;
+  if (provider === "openrouter") return process.env.OPENROUTER_API_KEY;
+  throw new Error(`Unknown LLM provider: ${provider}`);
 }
 
 export function getProviderClientConfig(provider = getLlmProvider()) {
@@ -63,6 +67,17 @@ export function getProviderClientConfig(provider = getLlmProvider()) {
     };
   }
 
+  if (provider === "minimax") {
+    return {
+      baseURL: "https://api.minimax.io/v1",
+      apiKey: getProviderApiKey(provider),
+    };
+  }
+
+  if (provider !== "openrouter") {
+    throw new Error(`Unknown LLM provider: ${provider}`);
+  }
+
   return {
     baseURL: "https://openrouter.ai/api/v1",
     apiKey: getProviderApiKey(provider),
@@ -77,6 +92,10 @@ export function getChatCompletionsEndpoint(provider = getLlmProvider()) {
     throw new Error("Claude provider uses the Claude CLI (OAuth), not direct chat completions.");
   }
   if (provider === "deepseek") return "https://api.deepseek.com/chat/completions";
+  if (provider === "minimax") return "https://api.minimax.io/v1/chat/completions";
+  if (provider !== "openrouter") {
+    throw new Error(`Unknown LLM provider: ${provider}`);
+  }
   return "https://openrouter.ai/api/v1/chat/completions";
 }
 
