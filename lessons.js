@@ -570,17 +570,21 @@ export function evolveThresholds(perfData, config, { userConfig, lessonsData } =
     }
   }
 
-  if (Object.keys(changes).length === 0) return { changes: {}, rationale: {} };
-
   // ── Persist changes to user-config.json ───────────────────────
   // Use shared userConfig if provided by caller (avoids redundant read/write
   // when evolveThresholds + evolveFromLessons run back-to-back).
   if (!userConfig) userConfig = readUserConfig();
 
-  Object.assign(userConfig, changes);
+  // Always update the counter so we don't re-check the same data every close
   userConfig._lastEvolved = new Date().toISOString();
   userConfig._positionsAtEvolution = perfData.length;
 
+  if (Object.keys(changes).length === 0) {
+    writeUserConfig(userConfig);
+    return { changes: {}, rationale: {}, userConfig };
+  }
+
+  Object.assign(userConfig, changes);
   writeUserConfig(userConfig);
 
   // Apply to live config object immediately
