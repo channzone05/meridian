@@ -525,6 +525,12 @@ ${activeStrategy ? `\nSAVED STRATEGY (reference, not mandatory): ${activeStrateg
               study_win_rate: null,    // filled by tool signal capture in executor
               hive_consensus: null,    // filled by hive mind if available
               ath_proximity: c._okxResult?.ath_proximity_pct ?? null,
+              // New Darwinian signals
+              volume_trend: c._okxResult?.candles?.volume_trend ?? null,
+              okx_signal_present: (c._okxSignal?.signal_count_30m || 0) > 0,
+              change_1h: c._okxResult?.change_1h ?? null,
+              candle_price_range: c._okxResult?.candles?.price_range_pct ?? null,
+              // Extra OKX signal metadata (not weighted but stored for analysis)
               okx_signal_count_30m: c._okxSignal?.signal_count_30m ?? null,
               okx_signal_count_2h: c._okxSignal?.signal_count_2h ?? null,
               okx_signal_amount_30m: c._okxSignal?.signal_amount_usd_30m ?? null,

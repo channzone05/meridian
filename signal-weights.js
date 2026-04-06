@@ -28,6 +28,11 @@ const SIGNAL_NAMES = [
   "hive_consensus",
   "volatility",
   "ath_proximity",
+  // New signals from OKX candle + signal feed
+  "volume_trend",       // increasing/decreasing/stable — from 5m candles
+  "okx_signal_present", // smart money/KOL/whale activity on token
+  "change_1h",          // 1-hour price change from OKX
+  "candle_price_range",  // real-time volatility from 5m candle spread
 ];
 
 const DEFAULT_WEIGHTS = Object.fromEntries(SIGNAL_NAMES.map((s) => [s, 1.0]));
@@ -43,10 +48,10 @@ const HIGHER_IS_BETTER = new Set([
 ]);
 
 // Boolean signals — compared by win rate when present vs absent
-const BOOLEAN_SIGNALS = new Set(["smart_wallets_present"]);
+const BOOLEAN_SIGNALS = new Set(["smart_wallets_present", "okx_signal_present"]);
 
 // Categorical signals — compared by win rate across categories
-const CATEGORICAL_SIGNALS = new Set(["narrative_quality"]);
+const CATEGORICAL_SIGNALS = new Set(["narrative_quality", "volume_trend"]);
 
 // ─── Persistence ─────────────────────────────────────────────────
 
