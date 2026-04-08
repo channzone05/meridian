@@ -7,7 +7,7 @@ import { agentLoop, lightChat, getScreenerModelLabel, screenerLoop } from "./age
 import { log } from "./logger.js";
 import { getMyPositions } from "./tools/dlmm.js";
 import { getWalletBalances } from "./tools/wallet.js";
-import { getTopCandidates } from "./tools/screening.js";
+import { getTopCandidates, rankCandidatesByDarwin } from "./tools/screening.js";
 import { config, reloadScreeningThresholds, computeDeployAmount } from "./config.js";
 import { evolveThresholds, getPerformanceSummary, deduplicateLessons } from "./lessons.js";
 import { registerCronRestarter } from "./tools/executor.js";
@@ -478,7 +478,14 @@ ${activeStrategy ? `\nSAVED STRATEGY (reference, not mandatory): ${activeStrateg
           const smartWalletCount = swResult?.in_pool?.length || 0;
           c._smartWalletCount = smartWalletCount;
 
-          let block = `[${c.name}] pool: ${c.pool} | bin_step: ${c.bin_step} | fee/aTVL: ${c.fee_active_tvl_ratio}% | vol: $${c.volume} | organic: ${c.organic_score} | holders: ${c.holders} | volatility: ${c.volatility ?? "?"}`;
+          let block = `[${c.name}] pool: ${c.pool} | darwin: ${c.darwin_score ?? "?"}/100 | bin_step: ${c.bin_step} | fee/aTVL: ${c.fee_active_tvl_ratio}% | vol: $${c.volume} | organic: ${c.organic_score} | holders: ${c.holders} | volatility: ${c.volatility ?? "?"}`;
+
+          if (Array.isArray(c.darwin_top_signals) && c.darwin_top_signals.length > 0) {
+            const topSignals = c.darwin_top_signals
+              .map((s) => `${s.signal}=${s.value} (${s.direction})`)
+              .join(", ");
+            block += `\n  Darwin context: higher score = better fit to learned winning signals. Top drivers: ${topSignals}`;
+          }
 
           if (dynFeeResult) block += ` | base_fee: ${c.fee_pct}% | dynamic_fee: ${dynFeeResult.dynamic_fee_pct}%`;
           if (tokenData) {
@@ -504,14 +511,23 @@ ${activeStrategy ? `\nSAVED STRATEGY (reference, not mandatory): ${activeStrateg
           if (okxSignalResult) {
             block += `\n  OKX signal: ${okxSignalResult.summary}`;
           }
-          return block;
+          return { pool: c.pool, block };
         }));
-        const validBlocks = blocks.filter(b => b.status === "fulfilled").map(b => b.value);
+        const rankedCandidates = rankCandidatesByDarwin(candidates);
+        loadedCandidates = rankedCandidates;
+        const blockMap = new Map(
+          blocks
+            .filter((b) => b.status === "fulfilled")
+            .map((b) => [b.value.pool, b.value.block])
+        );
+        const validBlocks = rankedCandidates
+          .map((c) => blockMap.get(c.pool))
+          .filter(Boolean);
         if (validBlocks.length > 0) {
-          candidateBlocks = `\n\nPRE-LOADED CANDIDATES (recon already done — evaluate and deploy the best one):\n${validBlocks.join("\n\n")}\n`;
+          candidateBlocks = `\n\nPRE-LOADED CANDIDATES (recon already done — evaluate and deploy the best one):\nDarwin score is a learned 0-100 ranking over the current shortlist. Higher = stronger fit to historically winning signal patterns. Use it as a ranking aid, not a hard deploy rule.\n${validBlocks.join("\n\n")}\n`;
         }
         // Stage signals for each candidate so deploy can snapshot them
-        for (const c of candidates) {
+        for (const c of rankedCandidates) {
           try {
             stageSignals(c.pool, {
               organic_score: c.organic_score ?? null,
@@ -544,7 +560,7 @@ ${activeStrategy ? `\nSAVED STRATEGY (reference, not mandatory): ${activeStrateg
         try {
           const hiveMind = await import("./hive-mind.js");
           if (hiveMind.isEnabled()) {
-            const poolAddresses = candidates.map(c => c.pool).filter(Boolean);
+            const poolAddresses = rankedCandidates.map(c => c.pool).filter(Boolean);
             if (poolAddresses.length > 0) {
               const hiveConsensus = await hiveMind.formatPoolConsensusForPrompt(poolAddresses);
               if (hiveConsensus) candidateBlocks += "\n" + hiveConsensus;
