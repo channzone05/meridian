@@ -623,6 +623,45 @@ ${truncated}`;
   return result;
 }
 
+const KB_CATEGORY_PRIORITY = {
+  SCREENER: ["strategies", "patterns", "screening", "lessons", "pools"],
+  MANAGER: ["performance", "lessons", "patterns", "strategies", "pools"],
+  GENERAL: ["patterns", "lessons", "performance", "strategies", "pools"],
+};
+
+export function getKbArticlesForPrompt(agentType = "GENERAL", maxArticles = 4) {
+  if (!config.knowledgeBase?.enabled) return [];
+
+  const categories = KB_CATEGORY_PRIORITY[agentType] || KB_CATEGORY_PRIORITY.GENERAL;
+  const seenPaths = new Set();
+  const selected = [];
+
+  for (const category of categories) {
+    const articles = listArticles(category);
+    for (const article of articles) {
+      const summary = (article.summary || "").trim();
+      if (!summary || /^\*\*Address:/i.test(summary) || /^\*Auto-created/i.test(summary)) {
+        continue;
+      }
+      if (seenPaths.has(article.path)) continue;
+      seenPaths.add(article.path);
+      selected.push({
+        category,
+        path: article.path,
+        title: article.title,
+        summary,
+        updated: article.updated,
+        words: article.words,
+      });
+      if (selected.length >= maxArticles) {
+        return selected;
+      }
+    }
+  }
+
+  return selected;
+}
+
 // ─── Pre-loading for Cycles ────────────────────────────────────
 
 /**

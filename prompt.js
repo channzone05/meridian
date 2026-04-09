@@ -14,7 +14,6 @@
  * @returns {string} - Complete system prompt
  */
 import { config } from "./config.js";
-import { getKbSummaryForPrompt } from "./knowledge-base.js";
 
 // ─── Section Override System (used by autoresearch) ──────────
 const _sectionOverrides = {};
@@ -129,7 +128,7 @@ function _defaultManagerLogic() {
 - Opportunity Cost: Only close to "free up SOL" if you see a significantly better pool that justifies the gas cost of exiting and re-entering.`;
 }
 
-export function buildSystemPrompt(agentType, portfolio, positions, stateSummary = null, lessons = null, perfSummary = null, memoryContext = null, signalWeights = null) {
+export function buildSystemPrompt(agentType, portfolio, positions, stateSummary = null, unifiedMemory = null, perfSummary = null, signalWeights = null) {
 
   // ═══════════════════════════════════════════════════════════════
   //  STATIC BLOCK — identical across all calls, maximizes cache hits
@@ -291,33 +290,12 @@ PNL DISPLAY: Report all PnL, fees, and values in ${pnlUnit.toUpperCase()}. Each 
 Current screening timeframe: ${config.screening.timeframe} — interpret all metrics relative to this window.
 `;
 
-  if (lessons) {
+  if (unifiedMemory) {
     prompt += `
 ═══════════════════════════════════════════
- LESSONS LEARNED
+ UNIFIED MEMORY
 ═══════════════════════════════════════════
-${lessons}
-`;
-  }
-
-  if (memoryContext) {
-    prompt += `
-═══════════════════════════════════════════
- HOLOGRAPHIC MEMORY
-═══════════════════════════════════════════
-${memoryContext}
-`;
-  }
-
-  // Knowledge base context (if enabled and populated)
-  let kbSummary = null;
-  try { kbSummary = getKbSummaryForPrompt(); } catch { /* kb summary is best-effort */ }
-  if (kbSummary) {
-    prompt += `
-═══════════════════════════════════════════
- KNOWLEDGE BASE
-═══════════════════════════════════════════
-${kbSummary}
+${unifiedMemory}
 `;
   }
 
