@@ -8,6 +8,7 @@ import { log } from "./logger.js";
 import { config } from "./config.js";
 import { getStateSummary } from "./state.js";
 import { getLessonsForPrompt, getPerformanceSummary } from "./lessons.js";
+import { getMemoryContext } from "./memory.js";
 import { getWeightsSummary } from "./signal-weights.js";
 import { getLpOverviewSummary } from "./tools/lp-overview.js";
 import { buildUnifiedMemoryBrief } from "./unified-memory.js";
