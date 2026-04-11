@@ -74,11 +74,14 @@ function getEnvironmentSnapshot() {
 
 function environmentChangedSince(snapshot = {}) {
   const current = getEnvironmentSnapshot();
+  // Only invalidate on threshold evolution (changes hard screening filters).
+  // Darwin weight recalcs only affect prompt summary text, not hard filters —
+  // they shouldn't invalidate experiments since the actual screening behavior
+  // doesn't change. This was causing 50%+ of experiments to be invalidated
+  // before completing the 7-close minimum.
   return (
     current.thresholds_last_evolved !== (snapshot.thresholds_last_evolved ?? null) ||
-    current.thresholds_positions_at_evolution !== (snapshot.thresholds_positions_at_evolution ?? 0) ||
-    current.darwin_last_recalc !== (snapshot.darwin_last_recalc ?? null) ||
-    current.darwin_recalc_count !== (snapshot.darwin_recalc_count ?? 0)
+    current.thresholds_positions_at_evolution !== (snapshot.thresholds_positions_at_evolution ?? 0)
   );
 }
 
