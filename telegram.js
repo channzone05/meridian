@@ -9,6 +9,7 @@ const USER_CONFIG_PATH = path.join(__dirname, "user-config.json");
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN || null;
 const BASE  = TOKEN ? `https://api.telegram.org/bot${TOKEN}` : null;
+const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || null;
 
 let chatId   = process.env.TELEGRAM_CHAT_ID || null;
 let _offset  = 0;
@@ -39,8 +40,23 @@ function saveChatId(id) {
 loadChatId();
 
 // ─── Core send ───────────────────────────────────────────────────
+// ─── Discord helper ───────────────────────────────────────
+async function sendDiscord(text) {
+  if (!DISCORD_WEBHOOK_URL) return;
+  try {
+    await fetch(DISCORD_WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: text }),
+    });
+  } catch (e) {
+    log("discord_error", e.message);
+  }
+}
+
+// ─── Guards ──────────────────────────────────────────────────────
 export function isEnabled() {
-  return !!TOKEN;
+  return !!TOKEN || !!DISCORD_WEBHOOK_URL;
 }
 
 export async function sendMessage(text) {
@@ -145,16 +161,16 @@ export async function notifyDeploy({ pair, amountSol, position, tx }) {
   );
 }
 
-export async function notifyClose({ pair, pnlUsd, pnlSol, pnlPct }) {
+export async function notifyClose({ pair, pnlUsd, pnlSol, pnlPct, swapFailed }) {
   const { config } = await import("./config.js");
   const unit = config.management.pnlUnit || "sol";
   const val = unit === "sol" && pnlSol != null ? pnlSol : (pnlUsd ?? 0);
   const sign = val >= 0 ? "+" : "";
   const label = unit === "sol" && pnlSol != null ? `${sign}${val.toFixed(4)} SOL` : `${sign}$${val.toFixed(2)}`;
-  await sendHTML(
-    `🔒 <b>Closed</b> ${pair}\n` +
-    `PnL: ${label} (${sign}${(pnlPct ?? 0).toFixed(2)}%)`
-  );
+  const swapNote = swapFailed ? "\n⚠️ Post-close swap failed — tokens may still be in wallet" : "";
+  const msg = `🔒 **Closed** ${pair}\nPnL: ${label} (${sign}${(pnlPct ?? 0).toFixed(2)}%)${swapNote}`;
+  if (TOKEN) await sendHTML(msg);
+  if (DISCORD_WEBHOOK_URL) await sendDiscord(msg);
 }
 
 export async function notifyOutOfRange({ pair, minutesOOR }) {

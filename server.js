@@ -679,8 +679,8 @@ export function startServer(timersFn) {
   // ═══════════════════════════════════════════
 
   return new Promise((resolve) => {
-    server.listen(port, () => {
-      log("server", `Web server listening on http://localhost:${port}`);
+    server.listen(port, "127.0.0.1", () => {
+      log("server", `Web server listening on http://127.0.0.1:${port}`);
       resolve({ app, server, wss });
     });
   });

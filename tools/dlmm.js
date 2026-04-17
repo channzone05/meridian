@@ -1509,6 +1509,7 @@ export async function closePosition({ position_address, _pnlOverride = null }) {
       } catch { /* best-effort */ }
 
       // ─── Hard rule: always swap base token back to SOL after close ───
+      let swapFailed = false;
       try {
         const baseMint = tracked.base_mint;
         const SOL = "So11111111111111111111111111111111111111112";
@@ -1517,24 +1518,36 @@ export async function closePosition({ position_address, _pnlOverride = null }) {
           const baseToken = walletBals.tokens?.find((t) => t.mint === baseMint);
           if (baseToken && baseToken.balance > 0 && (baseToken.usd ?? 0) >= 0.10) {
             log("close", `Auto-swapping ${baseToken.balance} ${baseToken.symbol || baseMint.slice(0, 8)} -> SOL (worth $${baseToken.usd})`);
-            const swapResult = await swapToken({
+
+            // Retry once on failure
+            let swapResult = await swapToken({
               input_mint: baseMint,
               output_mint: SOL,
               amount: baseToken.balance,
             });
+            if (!swapResult?.success) {
+              log("close_warn", `Post-close swap attempt 1 failed: ${swapResult?.error || "unknown"}, retrying...`);
+              swapResult = await swapToken({
+                input_mint: baseMint,
+                output_mint: SOL,
+                amount: baseToken.balance,
+              });
+            }
             if (swapResult?.success) {
               log("close", `Post-close swap OK: tx ${swapResult.tx}`);
               txHashes.push(swapResult.tx);
             } else {
-              log("close_warn", `Post-close swap failed: ${swapResult?.error || "unknown"}`);
+              log("close_warn", `Post-close swap failed after 2 attempts: ${swapResult?.error || "unknown"}`);
+              swapFailed = true;
             }
           }
         }
       } catch (swapErr) {
         log("close_warn", `Post-close swap error: ${swapErr.message}`);
+        swapFailed = true;
       }
 
-      return { success: true, position: position_address, pool: poolAddress, txs: txHashes, pnl_usd: pnlUsd, pnl_pct: pnlPct };
+      return { success: true, position: position_address, pool: poolAddress, txs: txHashes, pnl_usd: pnlUsd, pnl_pct: pnlPct, swapFailed };
     }
 
     return { success: true, position: position_address, pool: poolAddress, txs: txHashes };

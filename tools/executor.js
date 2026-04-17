@@ -282,7 +282,7 @@ export async function executeTool(name, args) {
       if (name === "deploy_position") {
         emit("deploy", { pair: args.pool_name || args.pool_address?.slice(0, 8), amountSol: args.amount_y ?? args.amount_sol ?? 0, position: result.position, tx: result.tx });
       } else if (name === "close_position") {
-        emit("close", { pair: args.position_address?.slice(0, 8), pnlUsd: result.pnl_usd ?? 0, pnlSol: result.pnl_sol ?? null, pnlPct: result.pnl_pct ?? 0 });
+        emit("close", { pair: args.position_address?.slice(0, 8), pnlUsd: result.pnl_usd ?? 0, pnlSol: result.pnl_sol ?? null, pnlPct: result.pnl_pct ?? 0, swapFailed: result.swapFailed ?? false });
       }
 
       // ─── Capture screening signals from tool results ────────
